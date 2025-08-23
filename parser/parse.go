@@ -50,6 +50,33 @@ func ParseDir(dir string) ([]StructInfo, []FuncInfo, error) {
 							}
 						}
 					}
+					// If TypeSpec.Doc is empty, the comment may be attached to the enclosing GenDecl
+					if dir == "" {
+						// search file declarations to find the GenDecl that contains this TypeSpec
+						for _, decl := range file.Decls {
+							gd, ok := decl.(*ast.GenDecl)
+							if !ok || gd.Doc == nil {
+								continue
+							}
+							for _, spec := range gd.Specs {
+								if ts, ok := spec.(*ast.TypeSpec); ok && ts == x {
+									for _, c := range gd.Doc.List {
+										txt := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
+										if strings.HasPrefix(txt, "gofn:") {
+											dir = strings.TrimSpace(strings.TrimPrefix(txt, "gofn:"))
+											break
+										}
+									}
+								}
+								if dir != "" {
+									break
+								}
+							}
+							if dir != "" {
+								break
+							}
+						}
+					}
 					fields := []FieldInfo{}
 					for _, f := range st.Fields.List {
 						t := exprString(f.Type)
