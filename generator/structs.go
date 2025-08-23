@@ -51,8 +51,6 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				assigns = append(assigns, fmt.Sprintf("%s: %s", f.Name, pname))
 			}
 			ctorName := "New" + ifaceName
-			// option type name
-			optType := ifaceName + "Option"
 
 			// generate exported interface type
 			buf.WriteString(fmt.Sprintf("type %s interface {\n", ifaceName))
@@ -73,29 +71,6 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 			)
 			buf.WriteString(baseCtor)
 
-			// functional options type and WithX helpers
-			buf.WriteString(fmt.Sprintf("type %s func(*%s)\n\n", optType, s.Name))
-			for i, f := range s.Fields {
-				pname := fieldParamName(f.Name, i)
-				buf.WriteString(fmt.Sprintf("func With%s(%s %s) %s {\n    return func(r *%s) { r.%s = %s }\n}\n\n",
-					exportName(f.Name),
-					pname,
-					f.Type,
-					optType,
-					s.Name,
-					f.Name,
-					pname,
-				))
-			}
-
-			// options-based constructor: accepts functional options and applies them to a zero-valued record
-			buf.WriteString(fmt.Sprintf("func %sWithOptions(opts ...%s) %s {\n    r := %s{}\n    for _, o := range opts { o(&r) }\n    return r\n}\n\n",
-				ctorName,
-				optType,
-				ifaceName,
-				s.Name,
-			))
-
 			// getters (methods on private type) to satisfy interface
 			recv := strings.ToLower(string(s.Name[0]))
 			for _, f := range s.Fields {
@@ -111,6 +86,30 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				)
 				buf.WriteString(getter)
 			}
+		} else if dir == "optional" {
+			// generate only functional options and an options-based constructor
+			optTypeName := exportName(s.Name) + "Option"
+			buf.WriteString(fmt.Sprintf("type %s func(*%s)\n\n", optTypeName, s.Name))
+			for i, f := range s.Fields {
+				pname := fieldParamName(f.Name, i)
+				buf.WriteString(fmt.Sprintf("func With%s(%s %s) %s {\n    return func(r *%s) { r.%s = %s }\n}\n\n",
+					exportName(f.Name),
+					pname,
+					f.Type,
+					optTypeName,
+					s.Name,
+					f.Name,
+					pname,
+				))
+			}
+
+			// options-based constructor returns the concrete type
+			buf.WriteString(fmt.Sprintf("func New%sWithOptions(opts ...%s) %s {\n    r := %s{}\n    for _, o := range opts { o(&r) }\n    return r\n}\n\n",
+				exportName(s.Name),
+				optTypeName,
+				s.Name,
+				s.Name,
+			))
 		} else {
 			// fallback: create an immutable constructor
 			ctor := fmt.Sprintf("// Generated constructor for %s\nfunc New%s(%s) %s {\n    return %s{%s}\n}\n\n",
