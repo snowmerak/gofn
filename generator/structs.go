@@ -28,7 +28,7 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 		case "pipeline":
 			// generate composer using monad.Result
 			buf.WriteString("import (\n\t\"github.com/snowmerak/gofn/monad\"\n)\n\n")
-			compName := exportName(s.Name) + "PipelineComposer"
+			compName := exportName(s.Name) + "Composer"
 			n := len(s.Fields)
 			if n < 2 {
 				buf.WriteString("// pipeline: not enough fields to compose\n")
@@ -40,7 +40,7 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				}
 				buf.WriteString(fmt.Sprintf("func %s(%s) func(%s) monad.Result[%s] {\n", compName, strings.Join(parts, ", "), s.Fields[0].Type, s.Fields[n-1].Type))
 
-				// body
+				// body (generated composer)
 				buf.WriteString("    return func(t1 " + s.Fields[0].Type + ") monad.Result[" + s.Fields[n-1].Type + "] {\n")
 				if n == 2 {
 					// single-stage: just forward the call
