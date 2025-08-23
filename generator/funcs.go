@@ -24,13 +24,33 @@ func generateFuncs(outDir string, funcs []parser.FuncInfo) error {
 
 		fname := fmt.Sprintf("%s_%s_gen.go", f.Name, normalizeDirective(f.Directive))
 		out := filepath.Join(outDir, fname)
+
+		// attempt to use function position filename as source reference
+		srcPath := ""
+		if f.Pos.Filename != "" {
+			srcPath = f.Pos.Filename
+		}
+
 		formatted, err := formatSource(buf.Bytes())
 		if err != nil {
+			fmt.Printf("gofn: format failed for %s: %v\n", fname, err)
 			return err
 		}
+
+		doGen, reason, serr := shouldGenerate(srcPath, out)
+		if serr != nil {
+			fmt.Printf("gofn: check should-generate for %s: %v\n", fname, serr)
+		}
+		if !doGen {
+			fmt.Printf("gofn: skip %s - %s\n", fname, reason)
+			continue
+		}
+
 		if err := os.WriteFile(out, formatted, 0o644); err != nil {
+			fmt.Printf("gofn: failed to write %s: %v\n", out, err)
 			return err
 		}
+		fmt.Printf("gofn: generated %s\n", out)
 	}
 	return nil
 }

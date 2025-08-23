@@ -125,13 +125,33 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 
 		fname := fmt.Sprintf("%s_%s_gen.go", s.Name, normalizeDirective(s.Directive))
 		out := filepath.Join(outDir, fname)
+
+		// try to find source file path from position info (Pos.Filename)
+		srcPath := ""
+		if s.Pos.Filename != "" {
+			srcPath = s.Pos.Filename
+		}
+
 		formatted, err := formatSource(buf.Bytes())
 		if err != nil {
+			fmt.Printf("gofn: format failed for %s: %v\n", fname, err)
 			return err
 		}
+
+		doGen, reason, serr := shouldGenerate(srcPath, out)
+		if serr != nil {
+			fmt.Printf("gofn: check should-generate for %s: %v\n", fname, serr)
+		}
+		if !doGen {
+			fmt.Printf("gofn: skip %s - %s\n", fname, reason)
+			continue
+		}
+
 		if err := os.WriteFile(out, formatted, 0o644); err != nil {
+			fmt.Printf("gofn: failed to write %s: %v\n", out, err)
 			return err
 		}
+		fmt.Printf("gofn: generated %s\n", out)
 	}
 	return nil
 }
