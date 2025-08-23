@@ -42,7 +42,7 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 			// build exported interface name
 			ifaceName := exportName(s.Name)
 
-			// constructor params and assignments
+			// constructor params and assignments (required fields)
 			params := []string{}
 			assigns := []string{}
 			for i, f := range s.Fields {
@@ -51,6 +51,8 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				assigns = append(assigns, fmt.Sprintf("%s: %s", f.Name, pname))
 			}
 			ctorName := "New" + ifaceName
+			// option type name
+			optType := ifaceName + "Option"
 
 			// generate exported interface type
 			buf.WriteString(fmt.Sprintf("type %s interface {\n", ifaceName))
@@ -60,7 +62,8 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 			buf.WriteString("}\n\n")
 
 			// constructor returns the exported interface, implemented by private type
-			ctor := fmt.Sprintf("// Generated record constructor for %s\nfunc %s(%s) %s {\n    return %s{%s}\n}\n\n",
+			// provide two forms: basic constructor and options-based constructor
+			baseCtor := fmt.Sprintf("// Generated record constructor for %s\nfunc %s(%s) %s {\n    return %s{%s}\n}\n\n",
 				s.Name,
 				ctorName,
 				strings.Join(params, ", "),
@@ -68,7 +71,30 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				s.Name,
 				strings.Join(assigns, ", "),
 			)
-			buf.WriteString(ctor)
+			buf.WriteString(baseCtor)
+
+			// functional options type and WithX helpers
+			buf.WriteString(fmt.Sprintf("type %s func(*%s)\n\n", optType, s.Name))
+			for i, f := range s.Fields {
+				pname := fieldParamName(f.Name, i)
+				buf.WriteString(fmt.Sprintf("func With%s(%s %s) %s {\n    return func(r *%s) { r.%s = %s }\n}\n\n",
+					exportName(f.Name),
+					pname,
+					f.Type,
+					optType,
+					s.Name,
+					f.Name,
+					pname,
+				))
+			}
+
+			// options-based constructor: accepts functional options and applies them to a zero-valued record
+			buf.WriteString(fmt.Sprintf("func %sWithOptions(opts ...%s) %s {\n    r := %s{}\n    for _, o := range opts { o(&r) }\n    return r\n}\n\n",
+				ctorName,
+				optType,
+				ifaceName,
+				s.Name,
+			))
 
 			// getters (methods on private type) to satisfy interface
 			recv := strings.ToLower(string(s.Name[0]))

@@ -44,26 +44,38 @@ func generateCurriedFunc(f parser.FuncInfo) string {
 		var sb strings.Builder
 		for j := i; j < n; j++ {
 			sb.WriteString("func(")
+			// if this param is variadic, it should be represented with ellipsis
+			ptype := f.Params[j].Type
 			sb.WriteString(paramName(f.Params[j], j))
 			sb.WriteString(" ")
-			sb.WriteString(f.Params[j].Type)
+			sb.WriteString(ptype)
 			sb.WriteString(") ")
 		}
+		// append result types
 		if resCount == 1 {
 			sb.WriteString(f.Results[0].Type)
+		} else if resCount > 1 {
+			// multiple results: (t1, t2, ...)
+			parts := []string{}
+			for _, r := range f.Results {
+				parts = append(parts, r.Type)
+			}
+			sb.WriteString("(" + strings.Join(parts, ", ") + ")")
 		}
 		return sb.String()
 	}
 
 	b.WriteString("// Generated curried wrapper for " + f.Name + "\n")
+	// exported wrapper name (capitalize original name then append Curried)
+	wrapperName := exportName(f.Name) + "Curried"
 
 	// Top-level signature
 	if n == 0 {
 		// no params: just return original result directly
 		if resCount == 0 {
-			b.WriteString("func " + f.Name + "Curried() {")
+			b.WriteString("func " + wrapperName + "() {")
 		} else {
-			b.WriteString("func " + f.Name + "Curried() " + f.Results[0].Type + " {")
+			b.WriteString("func " + wrapperName + "() " + f.Results[0].Type + " {")
 		}
 		b.WriteString("\n    ")
 		if resCount == 0 {
@@ -76,13 +88,15 @@ func generateCurriedFunc(f parser.FuncInfo) string {
 	}
 
 	// signature: func NameCurried() <nested type>
-	b.WriteString("func " + f.Name + "Curried() " + remainingType(0) + " {\n")
+	b.WriteString("func " + wrapperName + "() " + remainingType(0) + " {\n")
 
 	// body: produce nested "return func(...) <remaining> {" lines
 	for i := 0; i < n; i++ {
 		indent := strings.Repeat("    ", i+1)
 		b.WriteString(indent + "return func(")
-		b.WriteString(paramName(f.Params[i], i) + " " + f.Params[i].Type + ") ")
+		// if this param is variadic (starts with ...), keep the ellipsis in the type
+		ptype := f.Params[i].Type
+		b.WriteString(paramName(f.Params[i], i) + " " + ptype + ") ")
 		// remaining return type after this param
 		rem := remainingType(i + 1)
 		if rem != "" {
@@ -101,7 +115,13 @@ func generateCurriedFunc(f parser.FuncInfo) string {
 	// arguments are parameter names p0..pn-1
 	args := []string{}
 	for i := 0; i < n; i++ {
-		args = append(args, paramName(f.Params[i], i))
+		// if param type is variadic (starts with ...), expand when forwarding: use 'arg...' in call
+		pname := paramName(f.Params[i], i)
+		if strings.HasPrefix(f.Params[i].Type, "...") {
+			args = append(args, pname+"...")
+		} else {
+			args = append(args, pname)
+		}
 	}
 	b.WriteString(strings.Join(args, ", ") + ")\n")
 

@@ -146,6 +146,8 @@ func exprString(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.Ident:
 		return t.Name
+	case *ast.Ellipsis:
+		return "..." + exprString(t.Elt)
 	case *ast.StarExpr:
 		return "*" + exprString(t.X)
 	case *ast.SelectorExpr:
