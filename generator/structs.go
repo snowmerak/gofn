@@ -44,7 +44,7 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				buf.WriteString("    return func(t1 " + s.Fields[0].Type + ") monad.Result[" + s.Fields[n-1].Type + "] {\n")
 				if n == 2 {
 					// single-stage: just forward the call
-					buf.WriteString(fmt.Sprintf("        return f1(t1)\n"))
+					buf.WriteString("        return f1(t1)\n")
 				} else {
 					// first stage: unwrap to get value for next
 					buf.WriteString("        v1, err := f1(t1).Unwrap()\n")
