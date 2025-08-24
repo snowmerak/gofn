@@ -106,6 +106,38 @@ func main() {
 	ok2, err2 := pipeErr(42).Unwrap()
 	fmt.Println("pipeline error:", ok2, "err!=nil:", err2 != nil)
 
+	// NEW: Error handling with custom handlers
+	fmt.Println("pipeline with error handlers:")
+	
+	// Error handler that provides fallback value
+	fallbackHandler := AnyPipeWithFallback(false) // fallback to false
+	pipeWithFallback := AnyPipeComposerWithErrorHandler(f1, f2Err, f3, fallbackHandler)
+	okFallback, errFallback := pipeWithFallback(42).Unwrap()
+	fmt.Println("  with fallback:", okFallback, "err:", errFallback)
+
+	// Error handler that logs and propagates
+	logHandler := AnyPipeWithLogging(func(stage int, err error) {
+		fmt.Printf("  [LOG] Stage %d failed: %v\n", stage, err)
+	})
+	pipeWithLog := AnyPipeComposerWithErrorHandler(f1, f2Err, f3, logHandler)
+	okLog, errLog := pipeWithLog(42).Unwrap()
+	fmt.Println("  with logging:", okLog, "err!=nil:", errLog != nil)
+
+	// Custom error handler for specific stages
+	customHandler := func(stageIndex int, err error) monad.Result[bool] {
+		switch stageIndex {
+		case 2: // f2 stage - provide recovery value
+			fmt.Printf("  [CUSTOM] Recovering from stage %d error: %v\n", stageIndex, err)
+			return monad.Ok(true) // recover with true
+		default:
+			fmt.Printf("  [CUSTOM] Cannot recover from stage %d error: %v\n", stageIndex, err)
+			return monad.Err[bool](err)
+		}
+	}
+	pipeWithCustom := AnyPipeComposerWithErrorHandler(f1, f2Err, f3, customHandler)
+	okCustom, errCustom := pipeWithCustom(42).Unwrap()
+	fmt.Println("  with custom handler:", okCustom, "err:", errCustom)
+
 	// match: pattern matching for Address
 	addr := Address{
 		Street: "123 Main St",

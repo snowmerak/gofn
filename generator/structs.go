@@ -29,37 +29,91 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 			// generate composer using monad.Result
 			buf.WriteString("import (\n\t\"github.com/snowmerak/gofn/monad\"\n)\n\n")
 			compName := exportName(s.Name) + "Composer"
+			compWithErrorName := exportName(s.Name) + "ComposerWithErrorHandler"
 			n := len(s.Fields)
 			if n < 2 {
 				buf.WriteString("// pipeline: not enough fields to compose\n")
 			} else {
-				// build parameters: f1 func(T1) monad.Result[T2], ..., f{n-1}
+				// 1. Basic composer (existing functionality)
 				parts := []string{}
 				for i := 0; i < n-1; i++ {
 					parts = append(parts, fmt.Sprintf("f%d func(%s) monad.Result[%s]", i+1, s.Fields[i].Type, s.Fields[i+1].Type))
 				}
 				buf.WriteString(fmt.Sprintf("func %s(%s) func(%s) monad.Result[%s] {\n", compName, strings.Join(parts, ", "), s.Fields[0].Type, s.Fields[n-1].Type))
 
-				// body (generated composer)
+				// Basic composer body
 				buf.WriteString("    return func(t1 " + s.Fields[0].Type + ") monad.Result[" + s.Fields[n-1].Type + "] {\n")
 				if n == 2 {
-					// single-stage: just forward the call
 					buf.WriteString("        return f1(t1)\n")
 				} else {
-					// first stage: unwrap to get value for next
 					buf.WriteString("        v1, err := f1(t1).Unwrap()\n")
 					buf.WriteString("        if err != nil { return monad.Err[" + s.Fields[n-1].Type + "](err) }\n")
-					// middle stages: unwrap up to n-2
 					for i := 2; i <= n-2; i++ {
 						prev := fmt.Sprintf("v%d", i-1)
 						buf.WriteString(fmt.Sprintf("        v%d, err := f%d(%s).Unwrap()\n", i, i, prev))
 						buf.WriteString(fmt.Sprintf("        if err != nil { return monad.Err[%s](err) }\n", s.Fields[n-1].Type))
 					}
-					// final stage: call last function and return its Result
 					buf.WriteString(fmt.Sprintf("        return f%d(v%d)\n", n-1, n-2))
 				}
 				buf.WriteString("    }\n")
-				// close outer function
+				buf.WriteString("}\n\n")
+
+				// 2. Composer with error handler
+				partsWithHandler := make([]string, len(parts))
+				copy(partsWithHandler, parts)
+				partsWithHandler = append(partsWithHandler, fmt.Sprintf("errorHandler func(int, error) monad.Result[%s]", s.Fields[n-1].Type))
+				
+				buf.WriteString(fmt.Sprintf("// %s creates a pipeline composer with error handling capability\n", compWithErrorName))
+				buf.WriteString("// errorHandler receives (stageIndex, error) and can return a recovery value or propagate the error\n")
+				buf.WriteString(fmt.Sprintf("func %s(%s) func(%s) monad.Result[%s] {\n", compWithErrorName, strings.Join(partsWithHandler, ", "), s.Fields[0].Type, s.Fields[n-1].Type))
+
+				// Error handling composer body
+				buf.WriteString("    return func(t1 " + s.Fields[0].Type + ") monad.Result[" + s.Fields[n-1].Type + "] {\n")
+				if n == 2 {
+					buf.WriteString("        result := f1(t1)\n")
+					buf.WriteString("        if !result.IsOk() {\n")
+					buf.WriteString("            _, err := result.Unwrap()\n")
+					buf.WriteString("            return errorHandler(1, err)\n")
+					buf.WriteString("        }\n")
+					buf.WriteString("        return result\n")
+				} else {
+					buf.WriteString("        v1, err := f1(t1).Unwrap()\n")
+					buf.WriteString("        if err != nil {\n")
+					buf.WriteString("            return errorHandler(1, err)\n")
+					buf.WriteString("        }\n")
+					
+					for i := 2; i <= n-2; i++ {
+						prev := fmt.Sprintf("v%d", i-1)
+						buf.WriteString(fmt.Sprintf("        v%d, err := f%d(%s).Unwrap()\n", i, i, prev))
+						buf.WriteString("        if err != nil {\n")
+						buf.WriteString(fmt.Sprintf("            return errorHandler(%d, err)\n", i))
+						buf.WriteString("        }\n")
+					}
+					
+					buf.WriteString(fmt.Sprintf("        result := f%d(v%d)\n", n-1, n-2))
+					buf.WriteString("        if !result.IsOk() {\n")
+					buf.WriteString("            _, err := result.Unwrap()\n")
+					buf.WriteString(fmt.Sprintf("            return errorHandler(%d, err)\n", n-1))
+					buf.WriteString("        }\n")
+					buf.WriteString("        return result\n")
+				}
+				buf.WriteString("    }\n")
+				buf.WriteString("}\n\n")
+
+				// 3. Helper functions for common error handling patterns
+				buf.WriteString(fmt.Sprintf("// %sWithFallback creates an error handler that provides fallback values\n", exportName(s.Name)))
+				buf.WriteString(fmt.Sprintf("func %sWithFallback(fallbackValue %s) func(int, error) monad.Result[%s] {\n", exportName(s.Name), s.Fields[n-1].Type, s.Fields[n-1].Type))
+				buf.WriteString(fmt.Sprintf("    return func(stageIndex int, err error) monad.Result[%s] {\n", s.Fields[n-1].Type))
+				buf.WriteString("        return monad.Ok(fallbackValue)\n")
+				buf.WriteString("    }\n")
+				buf.WriteString("}\n\n")
+
+				buf.WriteString(fmt.Sprintf("// %sWithLogging creates an error handler that logs errors and propagates them\n", exportName(s.Name)))
+				buf.WriteString(fmt.Sprintf("func %sWithLogging(logger func(int, error)) func(int, error) monad.Result[%s] {\n", exportName(s.Name), s.Fields[n-1].Type))
+				buf.WriteString(fmt.Sprintf("    return func(stageIndex int, err error) monad.Result[%s] {\n", s.Fields[n-1].Type))
+				buf.WriteString("        logger(stageIndex, err)\n")
+				buf.WriteString(fmt.Sprintf("        return monad.Err[%s](err)\n", s.Fields[n-1].Type))
+				buf.WriteString("    }\n")
 				buf.WriteString("}\n\n")
 			}
 
