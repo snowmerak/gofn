@@ -106,27 +106,27 @@ func main() {
 		City:   "Seoul",
 		Zip:    "12345",
 	}
-
+	
 	fmt.Println("match examples:")
-
-	// Basic pattern matching
+	
+	// Basic pattern matching - using S for Some, N for None
 	addr.Match().
 		When(monad.S("123 Main St"), monad.S("Seoul"), monad.S("12345"), func(a Address) {
 			fmt.Println("  exact match: perfect address!")
 		}).
-		When(monad.W[string](), monad.S("Seoul"), monad.W[string](), func(a Address) {
+		When(monad.N[string](), monad.S("Seoul"), monad.N[string](), func(a Address) {
 			fmt.Println("  Seoul address")
 		}).
-		When(monad.W[string](), monad.W[string](), monad.S("12345"), func(a Address) {
+		When(monad.N[string](), monad.N[string](), monad.S("12345"), func(a Address) {
 			fmt.Println("  zip code 12345")
 		}).
 		Default(func(a Address) {
 			fmt.Println("  other address")
 		})
-
+	
 	// Pattern matching with guard conditions
 	addr.Match().
-		WhenGuard(monad.W[string](), monad.S("Seoul"), monad.W[string](),
+		WhenGuard(monad.N[string](), monad.S("Seoul"), monad.N[string](),
 			func(a Address) bool { return len(a.Street) > 10 },
 			func(a Address) {
 				fmt.Println("  Seoul address with long street name")
@@ -134,33 +134,33 @@ func main() {
 		Default(func(a Address) {
 			fmt.Println("  other or short street")
 		})
-
+	
 	// Pattern matching with return values
 	description := MatchAddressReturn[string](addr).
-		When(monad.S("123 Main St"), monad.W[string](), monad.W[string](), func(a Address) string {
+		When(monad.S("123 Main St"), monad.N[string](), monad.N[string](), func(a Address) string {
 			return "Main Street address in " + a.City
 		}).
-		When(monad.W[string](), monad.S("Seoul"), monad.W[string](), func(a Address) string {
+		When(monad.N[string](), monad.S("Seoul"), monad.N[string](), func(a Address) string {
 			return "Seoul: " + a.Street
 		}).
-		When(monad.W[string](), monad.W[string](), monad.S("12345"), func(a Address) string {
+		When(monad.N[string](), monad.N[string](), monad.S("12345"), func(a Address) string {
 			return "Zip 12345: " + a.Street + ", " + a.City
 		}).
 		Default("Unknown address pattern")
-
+	
 	fmt.Println("  description:", description)
-
+	
 	// Complex matching example
 	addressType := MatchAddressReturn[string](addr).
-		WhenGuard(monad.W[string](), monad.S("Seoul"), monad.W[string](),
+		WhenGuard(monad.N[string](), monad.S("Seoul"), monad.N[string](),
 			func(a Address) bool { return a.Street[0] >= '0' && a.Street[0] <= '9' },
 			func(a Address) string { return "Seoul numbered street" }).
-		WhenGuard(monad.W[string](), monad.W[string](), monad.W[string](),
+		WhenGuard(monad.N[string](), monad.N[string](), monad.N[string](),
 			func(a Address) bool { return len(a.Zip) == 5 },
 			func(a Address) string { return "Standard 5-digit zip" }).
 		DefaultWith(func(a Address) string {
 			return fmt.Sprintf("Custom: %s, %s %s", a.Street, a.City, a.Zip)
 		})
-
+	
 	fmt.Println("  type:", addressType)
 }

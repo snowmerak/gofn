@@ -57,14 +57,6 @@ func AndThenOption[T any, U any](o Option[T], f func(T) Option[U]) Option[U] {
 	return f(*o.value)
 }
 
-// Helper functions for common types
-func S(s string) Option[string]       { return Some(s) }
-func I(i int) Option[int]             { return Some(i) }
-func I32(i int32) Option[int32]       { return Some(i) }
-func I64(i int64) Option[int64]       { return Some(i) }
-func F32(f float32) Option[float32]   { return Some(f) }
-func F64(f float64) Option[float64]   { return Some(f) }
-func B(b bool) Option[bool]           { return Some(b) }
-
-// Wildcard helper - returns None for any type
-func W[T any]() Option[T] { return None[T]() }
+// Helper functions - S for Some, N for None
+func S[T any](value T) Option[T] { return Some(value) }
+func N[T any]() Option[T]        { return None[T]() }
