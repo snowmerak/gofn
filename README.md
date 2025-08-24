@@ -283,8 +283,11 @@ addr.Match().
     When(monad.S("123 Main St"), monad.S("Seoul"), monad.S("12345"), func(a Address) {
         fmt.Println("Exact match!")
     }).
-    When(monad.N[string](), monad.S("Seoul"), monad.N[string](), func(a Address) {
+    When(monad.W[string](), monad.S("Seoul"), monad.W[string](), func(a Address) {
         fmt.Println("Any Seoul address")
+    }).
+    When(monad.W[string](), monad.W[string](), monad.S("12345"), func(a Address) {
+        fmt.Println("Zip code 12345")
     }).
     Default(func(a Address) {
         fmt.Println("Other address")
@@ -292,7 +295,7 @@ addr.Match().
 
 // Pattern matching with guards
 addr.Match().
-    WhenGuard(monad.N[string](), monad.S("Seoul"), monad.N[string](),
+    WhenGuard(monad.W[string](), monad.S("Seoul"), monad.W[string](),
         func(a Address) bool { return len(a.Street) > 10 },
         func(a Address) {
             fmt.Println("Seoul address with long street name")
@@ -303,11 +306,14 @@ addr.Match().
 
 // Pattern matching with return values
 description := MatchAddressReturn[string](addr).
-    When(monad.S("123 Main St"), monad.N[string](), monad.N[string](), func(a Address) string {
+    When(monad.S("123 Main St"), monad.W[string](), monad.W[string](), func(a Address) string {
         return "Main Street address in " + a.City
     }).
-    When(monad.N[string](), monad.S("Seoul"), monad.N[string](), func(a Address) string {
+    When(monad.W[string](), monad.S("Seoul"), monad.W[string](), func(a Address) string {
         return "Seoul: " + a.Street
+    }).
+    When(monad.W[string](), monad.W[string](), monad.S("12345"), func(a Address) string {
+        return "Zip 12345: " + a.Street + ", " + a.City
     }).
     Default("Unknown address pattern")
 
@@ -316,7 +322,28 @@ fmt.Println(description) // "Main Street address in Seoul"
 
 **Pattern Matching Helpers:**
 - `monad.S[T](value)` - Match specific value (Some)
-- `monad.N[T]()` - Match any value (None/wildcard)
+- `monad.N[T]()` - Explicit absence (None - doesn't match actual values)
+- `monad.W[T]()` - Match any value (Wildcard - universal pattern)
+
+**Understanding None vs Wildcard:**
+```go
+// Example with empty string
+emptyAddr := Address{Street: "", City: "Seoul", Zip: "12345"}
+
+emptyAddr.Match().
+    When(monad.N[string](), monad.S("Seoul"), monad.W[string](), func(a Address) {
+        // This won't match - None doesn't match empty string
+        fmt.Println("None pattern")
+    }).
+    When(monad.S(""), monad.S("Seoul"), monad.W[string](), func(a Address) {
+        // This matches - Some("") explicitly matches empty string
+        fmt.Println("Explicit empty string match")
+    }).
+    When(monad.W[string](), monad.S("Seoul"), monad.W[string](), func(a Address) {
+        // This would also match - Wildcard matches everything
+        fmt.Println("Wildcard catches all")
+    })
+```
 
 ## Complete Example
 
@@ -381,10 +408,10 @@ func main() {
     }
     
     attempt.Match().
-        When(monad.S("admin"), monad.S(false), monad.N[string](), func(l LoginAttempt) {
+        When(monad.S("admin"), monad.S(false), monad.W[string](), func(l LoginAttempt) {
             fmt.Printf("Failed admin login from %s - ALERT!\n", l.IP)
         }).
-        When(monad.N[string](), monad.S(true), monad.N[string](), func(l LoginAttempt) {
+        When(monad.W[string](), monad.S(true), monad.W[string](), func(l LoginAttempt) {
             fmt.Printf("Successful login: %s\n", l.Username)
         }).
         Default(func(l LoginAttempt) {
@@ -395,7 +422,7 @@ func main() {
 
 ## Requirements
 
-- Go 1.21+ (for generics support)
+- Go 1.25+ (for generics support)
 - The generated code depends on the `monad` package in this repository
 
 ## License
