@@ -100,15 +100,26 @@ func MapReactive[T any, U any](source *Reactive[T], transform func(T) U) *Reacti
 // FilterReactive creates a new reactive that only updates when the predicate is true
 func FilterReactive[T any](source *Reactive[T], predicate func(T) bool) *Reactive[T] {
 	current := source.Get()
-	result := NewReactive(current)
+	var zero T
 	
-	source.Subscribe(func(old, new T) {
-		if predicate(new) {
-			result.Set(new)
-		}
-	})
-	
-	return result
+	// Initialize with zero value if current doesn't pass filter
+	if predicate(current) {
+		result := NewReactive(current)
+		source.Subscribe(func(old, new T) {
+			if predicate(new) {
+				result.Set(new)
+			}
+		})
+		return result
+	} else {
+		result := NewReactive(zero)
+		source.Subscribe(func(old, new T) {
+			if predicate(new) {
+				result.Set(new)
+			}
+		})
+		return result
+	}
 }
 
 // CombineReactives combines two reactives into one
