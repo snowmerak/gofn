@@ -7,7 +7,7 @@ gofn is a powerful Go code generator that scans your source for `//gofn:` direct
 - **Record types**: Private structs → exported interfaces with constructors and getters
 - **Optional configurations**: Functional options pattern for flexible struct initialization
 - **Curried functions**: Transform regular functions into curried versions
-- **Pipeline composition**: Compose stage functions with Result short-circuiting
+- **Pipeline composition**: Compose stage functions with Result short-circuiting and advanced error handling
 - **Pattern matching**: Rust-style pattern matching for structs with Option types
 - **Smart generation**: Skips generation when output is up-to-date
 
@@ -171,7 +171,7 @@ quotient, remainder := DivModCurried()(10)(3) // 3, 1
 
 ### 4. `//gofn:pipeline` - Pipeline Composition
 
-Compose stage functions with automatic error short-circuiting using Result types.
+Compose stage functions with automatic error short-circuiting using Result types. Includes advanced error handling capabilities.
 
 **Input:**
 ```go
@@ -185,21 +185,54 @@ type DataPipeline struct {
 
 **Generated:**
 ```go
+// Basic composer - original functionality
 func DataPipelineComposer(
     f1 func(string) monad.Result[int],
     f2 func(int) monad.Result[float64],
 ) func(string) monad.Result[float64] {
     return func(input string) monad.Result[float64] {
-        r1 := f1(input)
-        if !r1.IsOk() {
-            return monad.Err[float64](r1.Error())
+        v1, err := f1(input).Unwrap()
+        if err != nil { return monad.Err[float64](err) }
+        return f2(v1)
+    }
+}
+
+// Enhanced composer with error handling
+func DataPipelineComposerWithErrorHandler(
+    f1 func(string) monad.Result[int],
+    f2 func(int) monad.Result[float64],
+    errorHandler func(int, error) monad.Result[float64],
+) func(string) monad.Result[float64] {
+    return func(input string) monad.Result[float64] {
+        v1, err := f1(input).Unwrap()
+        if err != nil {
+            return errorHandler(1, err) // Stage 1 error
         }
-        return f2(r1.Value())
+        result := f2(v1)
+        if !result.IsOk() {
+            _, err := result.Unwrap()
+            return errorHandler(2, err) // Stage 2 error
+        }
+        return result
+    }
+}
+
+// Helper functions for common error handling patterns
+func DataPipelineWithFallback(fallbackValue float64) func(int, error) monad.Result[float64] {
+    return func(stageIndex int, err error) monad.Result[float64] {
+        return monad.Ok(fallbackValue)
+    }
+}
+
+func DataPipelineWithLogging(logger func(int, error)) func(int, error) monad.Result[float64] {
+    return func(stageIndex int, err error) monad.Result[float64] {
+        logger(stageIndex, err)
+        return monad.Err[float64](err)
     }
 }
 ```
 
-**Usage:**
+**Basic Usage:**
 ```go
 parseStr := func(s string) monad.Result[int] {
     if val, err := strconv.Atoi(s); err != nil {
@@ -213,9 +246,48 @@ toFloat := func(i int) monad.Result[float64] {
     return monad.Ok(float64(i) * 1.5)
 }
 
+// Basic pipeline composition
 pipeline := DataPipelineComposer(parseStr, toFloat)
 result, err := pipeline("42").Unwrap() // 63.0, nil
 ```
+
+**Advanced Error Handling:**
+```go
+// Pipeline with fallback on any error
+fallbackHandler := DataPipelineWithFallback(0.0)
+pipelineWithFallback := DataPipelineComposerWithErrorHandler(parseStr, toFloat, fallbackHandler)
+result, _ := pipelineWithFallback("invalid").Unwrap() // 0.0, nil (recovered)
+
+// Pipeline with logging
+logHandler := DataPipelineWithLogging(func(stage int, err error) {
+    fmt.Printf("Stage %d failed: %v
+", stage, err)
+})
+pipelineWithLogging := DataPipelineComposerWithErrorHandler(parseStr, toFloat, logHandler)
+
+// Custom error handling per stage
+customHandler := func(stageIndex int, err error) monad.Result[float64] {
+    switch stageIndex {
+    case 1: // parseStr failed
+        fmt.Printf("Parse error: %v, using default
+", err)
+        return monad.Ok(0.0) // Provide default value
+    case 2: // toFloat failed  
+        fmt.Printf("Conversion error: %v
+", err)
+        return monad.Err[float64](err) // Propagate error
+    default:
+        return monad.Err[float64](err)
+    }
+}
+pipelineWithCustom := DataPipelineComposerWithErrorHandler(parseStr, toFloat, customHandler)
+```
+
+**Error Handler Features:**
+- **Stage Index**: Know exactly which stage failed (1, 2, 3, ...)
+- **Error Recovery**: Return a recovery value or transform the error
+- **Stage-specific Logic**: Handle different stages with different strategies
+- **Composability**: Chain multiple error handling strategies
 
 ### 5. `//gofn:match` - Pattern Matching
 
@@ -352,6 +424,7 @@ package main
 
 import (
     "fmt"
+    "strconv"
     "github.com/snowmerak/gofn/monad"
 )
 
@@ -374,6 +447,13 @@ type ServerConfig struct {
 //gofn:curried
 func greet(prefix string, name string) string {
     return prefix + " " + name + "!"
+}
+
+//gofn:pipeline
+type ProcessingPipeline struct {
+    input   string
+    parsed  int
+    result  float64
 }
 
 //gofn:match
@@ -399,6 +479,34 @@ func main() {
     // Curried functions
     sayHello := GreetCurried()("Hello")
     fmt.Println(sayHello("World")) // "Hello World!"
+    
+    // Pipeline with error handling
+    parseInput := func(s string) monad.Result[int] {
+        if val, err := strconv.Atoi(s); err != nil {
+            return monad.Err[int](err)
+        } else {
+            return monad.Ok(val)
+        }
+    }
+    
+    processData := func(i int) monad.Result[float64] {
+        if i < 0 {
+            return monad.Err[float64](fmt.Errorf("negative input: %d", i))
+        }
+        return monad.Ok(float64(i) * 2.5)
+    }
+    
+    // Pipeline with fallback error handling
+    fallbackHandler := ProcessingPipelineWithFallback(-1.0)
+    pipeline := ProcessingPipelineComposerWithErrorHandler(parseInput, processData, fallbackHandler)
+    
+    result, _ := pipeline("42").Unwrap()
+    fmt.Printf("Pipeline result: %.1f
+", result) // "Pipeline result: 105.0"
+    
+    result2, _ := pipeline("invalid").Unwrap()
+    fmt.Printf("Pipeline fallback: %.1f
+", result2) // "Pipeline fallback: -1.0"
     
     // Pattern matching
     attempt := LoginAttempt{
