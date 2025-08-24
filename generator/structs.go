@@ -119,6 +119,12 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 			buf.WriteString(fmt.Sprintf("func New%sWithOptions(opts ...%s) %s {\n    r := %s{}\n    for _, o := range opts { o(&r) }\n    return r\n}\n\n",
 				exportName(s.Name), optTypeName, s.Name, s.Name))
 
+		case "match":
+			// Generate pattern matching code
+			if err := generateMatchCode(&buf, s); err != nil {
+				return fmt.Errorf("generating match code for %s: %w", s.Name, err)
+			}
+
 		default:
 			// fallback constructor
 			ctor := fmt.Sprintf("// Generated constructor for %s\nfunc New%s(%s) %s {\n    return %s{%s}\n}\n\n",
@@ -159,5 +165,232 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 		}
 		fmt.Printf("gofn: generated %s\n", out)
 	}
+	return nil
+}
+
+// generateMatchCode generates pattern matching code for a struct
+func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
+	structName := s.Name
+	matcherName := exportName(structName) + "Matcher"
+	returnMatcherName := exportName(structName) + "MatcherWithReturn"
+	
+	// Add import for monad package
+	buf.WriteString("import \"github.com/snowmerak/gofn/monad\"\n\n")
+	
+	// Generate matcher structs
+	buf.WriteString(fmt.Sprintf("// %s provides pattern matching for %s\n", matcherName, structName))
+	buf.WriteString(fmt.Sprintf("type %s struct {\n", matcherName))
+	buf.WriteString(fmt.Sprintf("\tvalue   %s\n", structName))
+	buf.WriteString("\tmatched bool\n")
+	buf.WriteString("}\n\n")
+	
+	buf.WriteString(fmt.Sprintf("// %s provides pattern matching with return values\n", returnMatcherName))
+	buf.WriteString(fmt.Sprintf("type %s[T any] struct {\n", returnMatcherName))
+	buf.WriteString(fmt.Sprintf("\tvalue   %s\n", structName))
+	buf.WriteString("\tmatched bool\n")
+	buf.WriteString("\tresult  T\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate Match method
+	buf.WriteString(fmt.Sprintf("// Match starts pattern matching on %s\n", structName))
+	buf.WriteString(fmt.Sprintf("func (%s %s) Match() *%s {\n", 
+		strings.ToLower(string(structName[0])), structName, matcherName))
+	buf.WriteString(fmt.Sprintf("\treturn &%s{value: %s, matched: false}\n", 
+		matcherName, strings.ToLower(string(structName[0]))))
+	buf.WriteString("}\n\n")
+	
+	// Generate MatchReturn function (since Go doesn't support generic methods)
+	buf.WriteString(fmt.Sprintf("// Match%sReturn starts pattern matching with return value on %s\n", 
+		exportName(structName), structName))
+	buf.WriteString(fmt.Sprintf("func Match%sReturn[T any](%s %s) *%s[T] {\n", 
+		exportName(structName), strings.ToLower(string(structName[0])), structName, returnMatcherName))
+	buf.WriteString("\tvar zero T\n")
+	buf.WriteString(fmt.Sprintf("\treturn &%s[T]{value: %s, matched: false, result: zero}\n", 
+		returnMatcherName, strings.ToLower(string(structName[0]))))
+	buf.WriteString("}\n\n")
+	
+	// Generate When method for basic matcher
+	buf.WriteString("// When matches against the provided pattern\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s) When(\n", matcherName))
+	
+	// Generate parameters for each field
+	for _, field := range s.Fields {
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+			strings.ToLower(field.Name), field.Type))
+	}
+	buf.WriteString(fmt.Sprintf("\thandler func(%s),\n", structName))
+	buf.WriteString(fmt.Sprintf(") *%s {\n", matcherName))
+	
+	buf.WriteString("\tif m.matched {\n\t\treturn m\n\t}\n\t\n")
+	buf.WriteString("\tif m.matchFields(")
+	
+	// Add field parameters to matchFields call
+	fieldParams := make([]string, len(s.Fields))
+	for i, field := range s.Fields {
+		fieldParams[i] = strings.ToLower(field.Name)
+	}
+	buf.WriteString(strings.Join(fieldParams, ", "))
+	buf.WriteString(") {\n")
+	buf.WriteString("\t\thandler(m.value)\n")
+	buf.WriteString("\t\tm.matched = true\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\treturn m\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate WhenGuard method
+	buf.WriteString("// WhenGuard matches against pattern with additional condition\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s) WhenGuard(\n", matcherName))
+	
+	for _, field := range s.Fields {
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+			strings.ToLower(field.Name), field.Type))
+	}
+	buf.WriteString(fmt.Sprintf("\tguard func(%s) bool,\n", structName))
+	buf.WriteString(fmt.Sprintf("\thandler func(%s),\n", structName))
+	buf.WriteString(fmt.Sprintf(") *%s {\n", matcherName))
+	
+	buf.WriteString("\tif m.matched {\n\t\treturn m\n\t}\n\t\n")
+	buf.WriteString("\tif m.matchFields(")
+	buf.WriteString(strings.Join(fieldParams, ", "))
+	buf.WriteString(") && guard(m.value) {\n")
+	buf.WriteString("\t\thandler(m.value)\n")
+	buf.WriteString("\t\tm.matched = true\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\treturn m\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate Default method
+	buf.WriteString("// Default executes if no pattern matched\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s) Default(handler func(%s)) {\n", matcherName, structName))
+	buf.WriteString("\tif !m.matched {\n")
+	buf.WriteString("\t\thandler(m.value)\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate When method for return matcher
+	buf.WriteString("// When matches against pattern and returns a value\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s[T]) When(\n", returnMatcherName))
+	
+	for _, field := range s.Fields {
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+			strings.ToLower(field.Name), field.Type))
+	}
+	buf.WriteString(fmt.Sprintf("\thandler func(%s) T,\n", structName))
+	buf.WriteString(fmt.Sprintf(") *%s[T] {\n", returnMatcherName))
+	
+	buf.WriteString("\tif m.matched {\n\t\treturn m\n\t}\n\t\n")
+	buf.WriteString("\tif m.matchFields(")
+	buf.WriteString(strings.Join(fieldParams, ", "))
+	buf.WriteString(") {\n")
+	buf.WriteString("\t\tm.result = handler(m.value)\n")
+	buf.WriteString("\t\tm.matched = true\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\treturn m\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate WhenGuard for return matcher
+	buf.WriteString("// WhenGuard matches against pattern with guard and returns a value\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s[T]) WhenGuard(\n", returnMatcherName))
+	
+	for _, field := range s.Fields {
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+			strings.ToLower(field.Name), field.Type))
+	}
+	buf.WriteString(fmt.Sprintf("\tguard func(%s) bool,\n", structName))
+	buf.WriteString(fmt.Sprintf("\thandler func(%s) T,\n", structName))
+	buf.WriteString(fmt.Sprintf(") *%s[T] {\n", returnMatcherName))
+	
+	buf.WriteString("\tif m.matched {\n\t\treturn m\n\t}\n\t\n")
+	buf.WriteString("\tif m.matchFields(")
+	buf.WriteString(strings.Join(fieldParams, ", "))
+	buf.WriteString(") && guard(m.value) {\n")
+	buf.WriteString("\t\tm.result = handler(m.value)\n")
+	buf.WriteString("\t\tm.matched = true\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\treturn m\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate Default methods for return matcher
+	buf.WriteString("// Default returns default value if no pattern matched\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s[T]) Default(defaultValue T) T {\n", returnMatcherName))
+	buf.WriteString("\tif !m.matched {\n")
+	buf.WriteString("\t\treturn defaultValue\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\treturn m.result\n")
+	buf.WriteString("}\n\n")
+	
+	buf.WriteString("// DefaultWith returns result of function if no pattern matched\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s[T]) DefaultWith(defaultFn func(%s) T) T {\n", returnMatcherName, structName))
+	buf.WriteString("\tif !m.matched {\n")
+	buf.WriteString("\t\treturn defaultFn(m.value)\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\treturn m.result\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate matchFields helper methods
+	buf.WriteString("// matchFields checks if all fields match the pattern\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s) matchFields(\n", matcherName))
+	for _, field := range s.Fields {
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+			strings.ToLower(field.Name), field.Type))
+	}
+	buf.WriteString(") bool {\n")
+	
+	conditions := make([]string, len(s.Fields))
+	for i, field := range s.Fields {
+		fieldName := strings.ToLower(field.Name)
+		conditions[i] = fmt.Sprintf("m.match%sField(%s, m.value.%s)", 
+			exportName(field.Type), fieldName, field.Name)
+	}
+	
+	buf.WriteString("\treturn " + strings.Join(conditions, " &&\n\t\t   ") + "\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate matchFields for return matcher
+	buf.WriteString("// matchFields checks if all fields match the pattern (for return matcher)\n")
+	buf.WriteString(fmt.Sprintf("func (m *%s[T]) matchFields(\n", returnMatcherName))
+	for _, field := range s.Fields {
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+			strings.ToLower(field.Name), field.Type))
+	}
+	buf.WriteString(") bool {\n")
+	
+	for i, field := range s.Fields {
+		fieldName := strings.ToLower(field.Name)
+		conditions[i] = fmt.Sprintf("m.match%sField(%s, m.value.%s)", 
+			exportName(field.Type), fieldName, field.Name)
+	}
+	
+	buf.WriteString("\treturn " + strings.Join(conditions, " &&\n\t\t   ") + "\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate field matching methods for each unique type
+	typesSeen := make(map[string]bool)
+	for _, field := range s.Fields {
+		if typesSeen[field.Type] {
+			continue
+		}
+		typesSeen[field.Type] = true
+		
+		typeName := exportName(field.Type)
+		buf.WriteString(fmt.Sprintf("// match%sField checks if a field matches the pattern\n", typeName))
+		buf.WriteString(fmt.Sprintf("func (m *%s) match%sField(pattern monad.Option[%s], value %s) bool {\n", 
+			matcherName, typeName, field.Type, field.Type))
+		buf.WriteString("\tif pattern.IsNone() {\n")
+		buf.WriteString("\t\treturn true // None is wildcard\n")
+		buf.WriteString("\t}\n")
+		buf.WriteString("\treturn pattern.Unwrap() == value\n")
+		buf.WriteString("}\n\n")
+		
+		buf.WriteString(fmt.Sprintf("// match%sField checks if a field matches the pattern (for return matcher)\n", typeName))
+		buf.WriteString(fmt.Sprintf("func (m *%s[T]) match%sField(pattern monad.Option[%s], value %s) bool {\n", 
+			returnMatcherName, typeName, field.Type, field.Type))
+		buf.WriteString("\tif pattern.IsNone() {\n")
+		buf.WriteString("\t\treturn true // None is wildcard\n")
+		buf.WriteString("\t}\n")
+		buf.WriteString("\treturn pattern.Unwrap() == value\n")
+		buf.WriteString("}\n\n")
+	}
+	
 	return nil
 }
