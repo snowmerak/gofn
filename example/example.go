@@ -106,27 +106,27 @@ func main() {
 		City:   "Seoul",
 		Zip:    "12345",
 	}
-	
+
 	fmt.Println("match examples:")
-	
-	// Basic pattern matching - using S for Some, N for None
+
+	// Basic pattern matching - S for Some, W for Wildcard, N for None
 	addr.Match().
 		When(monad.S("123 Main St"), monad.S("Seoul"), monad.S("12345"), func(a Address) {
 			fmt.Println("  exact match: perfect address!")
 		}).
-		When(monad.N[string](), monad.S("Seoul"), monad.N[string](), func(a Address) {
-			fmt.Println("  Seoul address")
+		When(monad.W[string](), monad.S("Seoul"), monad.W[string](), func(a Address) {
+			fmt.Println("  Seoul address (any street, any zip)")
 		}).
-		When(monad.N[string](), monad.N[string](), monad.S("12345"), func(a Address) {
-			fmt.Println("  zip code 12345")
+		When(monad.W[string](), monad.W[string](), monad.S("12345"), func(a Address) {
+			fmt.Println("  zip code 12345 (any street, any city)")
 		}).
 		Default(func(a Address) {
 			fmt.Println("  other address")
 		})
-	
+
 	// Pattern matching with guard conditions
 	addr.Match().
-		WhenGuard(monad.N[string](), monad.S("Seoul"), monad.N[string](),
+		WhenGuard(monad.W[string](), monad.S("Seoul"), monad.W[string](),
 			func(a Address) bool { return len(a.Street) > 10 },
 			func(a Address) {
 				fmt.Println("  Seoul address with long street name")
@@ -134,33 +134,57 @@ func main() {
 		Default(func(a Address) {
 			fmt.Println("  other or short street")
 		})
-	
+
 	// Pattern matching with return values
 	description := MatchAddressReturn[string](addr).
-		When(monad.S("123 Main St"), monad.N[string](), monad.N[string](), func(a Address) string {
+		When(monad.S("123 Main St"), monad.W[string](), monad.W[string](), func(a Address) string {
 			return "Main Street address in " + a.City
 		}).
-		When(monad.N[string](), monad.S("Seoul"), monad.N[string](), func(a Address) string {
+		When(monad.W[string](), monad.S("Seoul"), monad.W[string](), func(a Address) string {
 			return "Seoul: " + a.Street
 		}).
-		When(monad.N[string](), monad.N[string](), monad.S("12345"), func(a Address) string {
+		When(monad.W[string](), monad.W[string](), monad.S("12345"), func(a Address) string {
 			return "Zip 12345: " + a.Street + ", " + a.City
 		}).
 		Default("Unknown address pattern")
-	
+
 	fmt.Println("  description:", description)
-	
-	// Complex matching example
+
+	// Complex matching example with wildcards
 	addressType := MatchAddressReturn[string](addr).
-		WhenGuard(monad.N[string](), monad.S("Seoul"), monad.N[string](),
+		WhenGuard(monad.W[string](), monad.S("Seoul"), monad.W[string](),
 			func(a Address) bool { return a.Street[0] >= '0' && a.Street[0] <= '9' },
 			func(a Address) string { return "Seoul numbered street" }).
-		WhenGuard(monad.N[string](), monad.N[string](), monad.N[string](),
+		WhenGuard(monad.W[string](), monad.W[string](), monad.W[string](),
 			func(a Address) bool { return len(a.Zip) == 5 },
 			func(a Address) string { return "Standard 5-digit zip" }).
 		DefaultWith(func(a Address) string {
 			return fmt.Sprintf("Custom: %s, %s %s", a.Street, a.City, a.Zip)
 		})
-	
+
 	fmt.Println("  type:", addressType)
+
+	// Demonstrate the difference between None and Wildcard
+	fmt.Println("\nDemonstrating None vs Wildcard:")
+
+	// Example with potentially missing data
+	partialAddr := Address{
+		Street: "", // Empty string (not missing, but empty)
+		City:   "Seoul",
+		Zip:    "12345",
+	}
+
+	partialAddr.Match().
+		When(monad.N[string](), monad.S("Seoul"), monad.W[string](), func(a Address) {
+			fmt.Println("  None pattern - this won't match empty string")
+		}).
+		When(monad.S(""), monad.S("Seoul"), monad.W[string](), func(a Address) {
+			fmt.Println("  Empty street in Seoul (explicit empty string match)")
+		}).
+		When(monad.W[string](), monad.S("Seoul"), monad.W[string](), func(a Address) {
+			fmt.Println("  Any Seoul address (wildcard catches everything)")
+		}).
+		Default(func(a Address) {
+			fmt.Println("  No match")
+		})
 }
