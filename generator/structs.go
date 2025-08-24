@@ -125,6 +125,12 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				return fmt.Errorf("generating match code for %s: %w", s.Name, err)
 			}
 
+		case "reactive":
+			// Generate reactive wrapper code
+			if err := generateReactiveCode(&buf, s); err != nil {
+				return fmt.Errorf("generating reactive code for %s: %w", s.Name, err)
+			}
+
 		default:
 			// fallback constructor
 			ctor := fmt.Sprintf("// Generated constructor for %s\nfunc New%s(%s) %s {\n    return %s{%s}\n}\n\n",
@@ -397,6 +403,147 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 		buf.WriteString("\treturn pattern.Unwrap() == value\n")
 		buf.WriteString("}\n\n")
 	}
+	
+	return nil
+}
+
+// generateReactiveCode generates reactive wrapper code for a struct
+func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
+	structName := s.Name
+	reactiveTypeName := "Reactive" + exportName(structName)
+	
+	// Add import for monad package and sync
+	buf.WriteString("import (\n")
+	buf.WriteString("\t\"sync\"\n")
+	buf.WriteString("\t\"sync/atomic\"\n")
+	buf.WriteString("\t\"github.com/snowmerak/gofn/monad\"\n")
+	buf.WriteString(")\n\n")
+	
+	// Generate reactive wrapper struct
+	buf.WriteString(fmt.Sprintf("// %s provides reactive capabilities for %s\n", reactiveTypeName, structName))
+	buf.WriteString(fmt.Sprintf("type %s struct {\n", reactiveTypeName))
+	buf.WriteString(fmt.Sprintf("\tvalue %s\n", structName))
+	buf.WriteString(fmt.Sprintf("\tsubscribers map[int]func(old %s, new %s)\n", structName, structName))
+	buf.WriteString("\tnextID int64\n")
+	buf.WriteString("\tmutex sync.RWMutex\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate constructor
+	buf.WriteString(fmt.Sprintf("// NewReactive%s creates a new reactive wrapper for %s\n", exportName(structName), structName))
+	buf.WriteString(fmt.Sprintf("func NewReactive%s(initial %s) *%s {\n", exportName(structName), structName, reactiveTypeName))
+	buf.WriteString(fmt.Sprintf("\treturn &%s{\n", reactiveTypeName))
+	buf.WriteString("\t\tvalue: initial,\n")
+	buf.WriteString(fmt.Sprintf("\t\tsubscribers: make(map[int]func(old %s, new %s)),\n", structName, structName))
+	buf.WriteString("\t\tnextID: 0,\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate Get method
+	buf.WriteString(fmt.Sprintf("// Get returns the current %s value (thread-safe)\n", structName))
+	buf.WriteString(fmt.Sprintf("func (r *%s) Get() %s {\n", reactiveTypeName, structName))
+	buf.WriteString("\tr.mutex.RLock()\n")
+	buf.WriteString("\tdefer r.mutex.RUnlock()\n")
+	buf.WriteString("\treturn r.value\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate Set method
+	buf.WriteString(fmt.Sprintf("// Set updates the %s value and notifies all subscribers\n", structName))
+	buf.WriteString(fmt.Sprintf("func (r *%s) Set(newValue %s) {\n", reactiveTypeName, structName))
+	buf.WriteString("\tr.mutex.Lock()\n")
+	buf.WriteString("\toldValue := r.value\n")
+	buf.WriteString("\tr.value = newValue\n")
+	buf.WriteString("\t\n")
+	buf.WriteString("\t// Copy subscribers to avoid holding lock during notifications\n")
+	buf.WriteString(fmt.Sprintf("\tsubscribers := make(map[int]func(old %s, new %s))\n", structName, structName))
+	buf.WriteString("\tfor id, callback := range r.subscribers {\n")
+	buf.WriteString("\t\tsubscribers[id] = callback\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\tr.mutex.Unlock()\n")
+	buf.WriteString("\t\n")
+	buf.WriteString("\t// Notify subscribers outside of lock to prevent deadlocks\n")
+	buf.WriteString("\tfor _, callback := range subscribers {\n")
+	buf.WriteString("\t\tgo callback(oldValue, newValue)\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate Update method
+	buf.WriteString(fmt.Sprintf("// Update applies a function to the current %s value\n", structName))
+	buf.WriteString(fmt.Sprintf("func (r *%s) Update(fn func(%s) %s) {\n", reactiveTypeName, structName, structName))
+	buf.WriteString("\tr.mutex.Lock()\n")
+	buf.WriteString("\toldValue := r.value\n")
+	buf.WriteString("\tnewValue := fn(r.value)\n")
+	buf.WriteString("\tr.value = newValue\n")
+	buf.WriteString("\t\n")
+	buf.WriteString("\t// Copy subscribers to avoid holding lock during notifications\n")
+	buf.WriteString(fmt.Sprintf("\tsubscribers := make(map[int]func(old %s, new %s))\n", structName, structName))
+	buf.WriteString("\tfor id, callback := range r.subscribers {\n")
+	buf.WriteString("\t\tsubscribers[id] = callback\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\tr.mutex.Unlock()\n")
+	buf.WriteString("\t\n")
+	buf.WriteString("\t// Notify subscribers outside of lock to prevent deadlocks\n")
+	buf.WriteString("\tfor _, callback := range subscribers {\n")
+	buf.WriteString("\t\tgo callback(oldValue, newValue)\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate Subscribe method
+	buf.WriteString("// Subscribe adds a callback for value changes\n")
+	buf.WriteString("// Returns subscription ID for unsubscribing\n")
+	buf.WriteString(fmt.Sprintf("func (r *%s) Subscribe(callback func(old %s, new %s)) int {\n", reactiveTypeName, structName, structName))
+	buf.WriteString("\tr.mutex.Lock()\n")
+	buf.WriteString("\tdefer r.mutex.Unlock()\n")
+	buf.WriteString("\t\n")
+	buf.WriteString("\tid := int(atomic.AddInt64(&r.nextID, 1))\n")
+	buf.WriteString("\tr.subscribers[id] = callback\n")
+	buf.WriteString("\treturn id\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate Unsubscribe method
+	buf.WriteString("// Unsubscribe removes a subscription by ID\n")
+	buf.WriteString(fmt.Sprintf("func (r *%s) Unsubscribe(id int) {\n", reactiveTypeName))
+	buf.WriteString("\tr.mutex.Lock()\n")
+	buf.WriteString("\tdefer r.mutex.Unlock()\n")
+	buf.WriteString("\tdelete(r.subscribers, id)\n")
+	buf.WriteString("}\n\n")
+	
+	// Generate field-specific setters that trigger reactivity
+	for _, field := range s.Fields {
+		// Skip private fields (fields that don't start with uppercase)
+		if len(field.Name) == 0 || (field.Name[0] < 'A' || field.Name[0] > 'Z') {
+			continue
+		}
+		
+		setterName := "Set" + exportName(field.Name)
+		buf.WriteString(fmt.Sprintf("// %s updates the %s field and notifies subscribers\n", setterName, field.Name))
+		buf.WriteString(fmt.Sprintf("func (r *%s) %s(value %s) {\n", reactiveTypeName, setterName, field.Type))
+		buf.WriteString(fmt.Sprintf("\tr.Update(func(current %s) %s {\n", structName, structName))
+		buf.WriteString(fmt.Sprintf("\t\tcurrent.%s = value\n", field.Name))
+		buf.WriteString("\t\treturn current\n")
+		buf.WriteString("\t})\n")
+		buf.WriteString("}\n\n")
+		
+		// Generate field getter
+		getterName := "Get" + exportName(field.Name) 
+		buf.WriteString(fmt.Sprintf("// %s returns the current %s field value\n", getterName, field.Name))
+		buf.WriteString(fmt.Sprintf("func (r *%s) %s() %s {\n", reactiveTypeName, getterName, field.Type))
+		buf.WriteString(fmt.Sprintf("\treturn r.Get().%s\n", field.Name))
+		buf.WriteString("}\n\n")
+	}
+	
+	// Generate Map function for this specific type
+	mapFuncName := fmt.Sprintf("Map%s", exportName(structName))
+	buf.WriteString(fmt.Sprintf("// %s creates a reactive that transforms %s values\n", mapFuncName, structName))
+	buf.WriteString(fmt.Sprintf("func %s[U any](source *%s, transform func(%s) U) *monad.Reactive[U] {\n", 
+		mapFuncName, reactiveTypeName, structName))
+	buf.WriteString("\tresult := monad.NewReactive(transform(source.Get()))\n")
+	buf.WriteString("\t\n")
+	buf.WriteString(fmt.Sprintf("\tsource.Subscribe(func(old, new %s) {\n", structName))
+	buf.WriteString("\t\tresult.Set(transform(new))\n")
+	buf.WriteString("\t})\n")
+	buf.WriteString("\t\n")
+	buf.WriteString("\treturn result\n")
+	buf.WriteString("}\n\n")
 	
 	return nil
 }

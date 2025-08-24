@@ -62,6 +62,12 @@ type Address struct {
 	Zip    string
 }
 
+//gofn:reactive
+type Counter struct {
+	Value int
+	Name  string
+}
+
 // Demo: exercise all generated helpers.
 func main() {
 	// record: exported interface + constructor + getters
@@ -164,8 +170,60 @@ func main() {
 
 	fmt.Println("  type:", addressType)
 
+	// reactive: reactive programming with subscriptions
+	fmt.Println("reactive examples:")
+
+	counter := NewReactiveCounter(Counter{Value: 0, Name: "MainCounter"})
+
+	// Subscribe to changes
+	subID1 := counter.Subscribe(func(old, new Counter) {
+		fmt.Printf("  [Subscriber 1] Counter changed from %d to %d", old.Value, new.Value)
+	})
+
+	subID2 := counter.Subscribe(func(old, new Counter) {
+		if new.Value > 5 {
+			fmt.Printf("  [Subscriber 2] High value alert: %d", new.Value)
+		}
+	})
+
+	// Test value changes
+	fmt.Println("  Setting counter values...")
+	counter.SetValue(3)
+	counter.SetValue(7)
+	counter.Update(func(c Counter) Counter {
+		c.Value += 10
+		return c
+	})
+
+	// Test field-specific updates
+	counter.SetName("UpdatedCounter")
+
+	// Unsubscribe one listener
+	counter.Unsubscribe(subID1)
+	fmt.Println("  (Unsubscribed subscriber 1)")
+
+	counter.SetValue(20) // Only subscriber 2 should react
+
+	// Later unsubscribe subscriber 2 as well
+	counter.Unsubscribe(subID2)
+	fmt.Println("  (Unsubscribed subscriber 2)")
+
+	counter.SetValue(30) // No subscribers should react
+
+	// Demonstrate reactive mapping
+	fmt.Println("  Creating mapped reactive...")
+	stringReactive := MapCounter[string](counter, func(c Counter) string {
+		return fmt.Sprintf("%s: %d", c.Name, c.Value)
+	})
+
+	stringReactive.Subscribe(func(old, new string) {
+		fmt.Printf("  [String Reactive] %s", new)
+	})
+
+	counter.SetValue(25) // Should trigger both counter and string reactive
+
 	// Demonstrate the difference between None and Wildcard
-	fmt.Println("\nDemonstrating None vs Wildcard:")
+	fmt.Println("Demonstrating None vs Wildcard:")
 
 	// Example with potentially missing data
 	partialAddr := Address{
