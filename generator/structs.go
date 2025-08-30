@@ -62,7 +62,7 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				partsWithHandler := make([]string, len(parts))
 				copy(partsWithHandler, parts)
 				partsWithHandler = append(partsWithHandler, fmt.Sprintf("errorHandler func(int, error) monad.Result[%s]", s.Fields[n-1].Type))
-				
+
 				buf.WriteString(fmt.Sprintf("// %s creates a pipeline composer with error handling capability\n", compWithErrorName))
 				buf.WriteString("// errorHandler receives (stageIndex, error) and can return a recovery value or propagate the error\n")
 				buf.WriteString(fmt.Sprintf("func %s(%s) func(%s) monad.Result[%s] {\n", compWithErrorName, strings.Join(partsWithHandler, ", "), s.Fields[0].Type, s.Fields[n-1].Type))
@@ -81,7 +81,7 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 					buf.WriteString("        if err != nil {\n")
 					buf.WriteString("            return errorHandler(1, err)\n")
 					buf.WriteString("        }\n")
-					
+
 					for i := 2; i <= n-2; i++ {
 						prev := fmt.Sprintf("v%d", i-1)
 						buf.WriteString(fmt.Sprintf("        v%d, err := f%d(%s).Unwrap()\n", i, i, prev))
@@ -89,7 +89,7 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 						buf.WriteString(fmt.Sprintf("            return errorHandler(%d, err)\n", i))
 						buf.WriteString("        }\n")
 					}
-					
+
 					buf.WriteString(fmt.Sprintf("        result := f%d(v%d)\n", n-1, n-2))
 					buf.WriteString("        if !result.IsOk() {\n")
 					buf.WriteString("            _, err := result.Unwrap()\n")
@@ -185,6 +185,12 @@ func generateStructs(outDir string, structs []parser.StructInfo) error {
 				return fmt.Errorf("generating reactive code for %s: %w", s.Name, err)
 			}
 
+		case "ref":
+			// Generate reference wrapper code
+			if err := generateRefCode(&buf, s); err != nil {
+				return fmt.Errorf("generating ref code for %s: %w", s.Name, err)
+			}
+
 		default:
 			// fallback constructor
 			ctor := fmt.Sprintf("// Generated constructor for %s\nfunc New%s(%s) %s {\n    return %s{%s}\n}\n\n",
@@ -233,57 +239,57 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	structName := s.Name
 	matcherName := exportName(structName) + "Matcher"
 	returnMatcherName := exportName(structName) + "MatcherWithReturn"
-	
+
 	// Add import for monad package
 	buf.WriteString("import \"github.com/snowmerak/gofn/monad\"\n\n")
-	
+
 	// Generate matcher structs
 	buf.WriteString(fmt.Sprintf("// %s provides pattern matching for %s\n", matcherName, structName))
 	buf.WriteString(fmt.Sprintf("type %s struct {\n", matcherName))
 	buf.WriteString(fmt.Sprintf("\tvalue   %s\n", structName))
 	buf.WriteString("\tmatched bool\n")
 	buf.WriteString("}\n\n")
-	
+
 	buf.WriteString(fmt.Sprintf("// %s provides pattern matching with return values\n", returnMatcherName))
 	buf.WriteString(fmt.Sprintf("type %s[T any] struct {\n", returnMatcherName))
 	buf.WriteString(fmt.Sprintf("\tvalue   %s\n", structName))
 	buf.WriteString("\tmatched bool\n")
 	buf.WriteString("\tresult  T\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate Match method
 	buf.WriteString(fmt.Sprintf("// Match starts pattern matching on %s\n", structName))
-	buf.WriteString(fmt.Sprintf("func (%s %s) Match() *%s {\n", 
+	buf.WriteString(fmt.Sprintf("func (%s %s) Match() *%s {\n",
 		strings.ToLower(string(structName[0])), structName, matcherName))
-	buf.WriteString(fmt.Sprintf("\treturn &%s{value: %s, matched: false}\n", 
+	buf.WriteString(fmt.Sprintf("\treturn &%s{value: %s, matched: false}\n",
 		matcherName, strings.ToLower(string(structName[0]))))
 	buf.WriteString("}\n\n")
-	
+
 	// Generate MatchReturn function (since Go doesn't support generic methods)
-	buf.WriteString(fmt.Sprintf("// Match%sReturn starts pattern matching with return value on %s\n", 
+	buf.WriteString(fmt.Sprintf("// Match%sReturn starts pattern matching with return value on %s\n",
 		exportName(structName), structName))
-	buf.WriteString(fmt.Sprintf("func Match%sReturn[T any](%s %s) *%s[T] {\n", 
+	buf.WriteString(fmt.Sprintf("func Match%sReturn[T any](%s %s) *%s[T] {\n",
 		exportName(structName), strings.ToLower(string(structName[0])), structName, returnMatcherName))
 	buf.WriteString("\tvar zero T\n")
-	buf.WriteString(fmt.Sprintf("\treturn &%s[T]{value: %s, matched: false, result: zero}\n", 
+	buf.WriteString(fmt.Sprintf("\treturn &%s[T]{value: %s, matched: false, result: zero}\n",
 		returnMatcherName, strings.ToLower(string(structName[0]))))
 	buf.WriteString("}\n\n")
-	
+
 	// Generate When method for basic matcher
 	buf.WriteString("// When matches against the provided pattern\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s) When(\n", matcherName))
-	
+
 	// Generate parameters for each field
 	for _, field := range s.Fields {
-		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n",
 			strings.ToLower(field.Name), field.Type))
 	}
 	buf.WriteString(fmt.Sprintf("\thandler func(%s),\n", structName))
 	buf.WriteString(fmt.Sprintf(") *%s {\n", matcherName))
-	
+
 	buf.WriteString("\tif m.matched {\n\t\treturn m\n\t}\n\t\n")
 	buf.WriteString("\tif m.matchFields(")
-	
+
 	// Add field parameters to matchFields call
 	fieldParams := make([]string, len(s.Fields))
 	for i, field := range s.Fields {
@@ -296,19 +302,19 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn m\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate WhenGuard method
 	buf.WriteString("// WhenGuard matches against pattern with additional condition\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s) WhenGuard(\n", matcherName))
-	
+
 	for _, field := range s.Fields {
-		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n",
 			strings.ToLower(field.Name), field.Type))
 	}
 	buf.WriteString(fmt.Sprintf("\tguard func(%s) bool,\n", structName))
 	buf.WriteString(fmt.Sprintf("\thandler func(%s),\n", structName))
 	buf.WriteString(fmt.Sprintf(") *%s {\n", matcherName))
-	
+
 	buf.WriteString("\tif m.matched {\n\t\treturn m\n\t}\n\t\n")
 	buf.WriteString("\tif m.matchFields(")
 	buf.WriteString(strings.Join(fieldParams, ", "))
@@ -318,7 +324,7 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn m\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate Default method
 	buf.WriteString("// Default executes if no pattern matched\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s) Default(handler func(%s)) {\n", matcherName, structName))
@@ -326,18 +332,18 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t\thandler(m.value)\n")
 	buf.WriteString("\t}\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate When method for return matcher
 	buf.WriteString("// When matches against pattern and returns a value\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s[T]) When(\n", returnMatcherName))
-	
+
 	for _, field := range s.Fields {
-		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n",
 			strings.ToLower(field.Name), field.Type))
 	}
 	buf.WriteString(fmt.Sprintf("\thandler func(%s) T,\n", structName))
 	buf.WriteString(fmt.Sprintf(") *%s[T] {\n", returnMatcherName))
-	
+
 	buf.WriteString("\tif m.matched {\n\t\treturn m\n\t}\n\t\n")
 	buf.WriteString("\tif m.matchFields(")
 	buf.WriteString(strings.Join(fieldParams, ", "))
@@ -347,19 +353,19 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn m\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate WhenGuard for return matcher
 	buf.WriteString("// WhenGuard matches against pattern with guard and returns a value\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s[T]) WhenGuard(\n", returnMatcherName))
-	
+
 	for _, field := range s.Fields {
-		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n",
 			strings.ToLower(field.Name), field.Type))
 	}
 	buf.WriteString(fmt.Sprintf("\tguard func(%s) bool,\n", structName))
 	buf.WriteString(fmt.Sprintf("\thandler func(%s) T,\n", structName))
 	buf.WriteString(fmt.Sprintf(") *%s[T] {\n", returnMatcherName))
-	
+
 	buf.WriteString("\tif m.matched {\n\t\treturn m\n\t}\n\t\n")
 	buf.WriteString("\tif m.matchFields(")
 	buf.WriteString(strings.Join(fieldParams, ", "))
@@ -369,7 +375,7 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn m\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate Default methods for return matcher
 	buf.WriteString("// Default returns default value if no pattern matched\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s[T]) Default(defaultValue T) T {\n", returnMatcherName))
@@ -378,7 +384,7 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn m.result\n")
 	buf.WriteString("}\n\n")
-	
+
 	buf.WriteString("// DefaultWith returns result of function if no pattern matched\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s[T]) DefaultWith(defaultFn func(%s) T) T {\n", returnMatcherName, structName))
 	buf.WriteString("\tif !m.matched {\n")
@@ -386,44 +392,44 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn m.result\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate matchFields helper methods
 	buf.WriteString("// matchFields checks if all fields match the pattern\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s) matchFields(\n", matcherName))
 	for _, field := range s.Fields {
-		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n",
 			strings.ToLower(field.Name), field.Type))
 	}
 	buf.WriteString(") bool {\n")
-	
+
 	conditions := make([]string, len(s.Fields))
 	for i, field := range s.Fields {
 		fieldName := strings.ToLower(field.Name)
-		conditions[i] = fmt.Sprintf("m.match%sField(%s, m.value.%s)", 
+		conditions[i] = fmt.Sprintf("m.match%sField(%s, m.value.%s)",
 			exportName(field.Type), fieldName, field.Name)
 	}
-	
+
 	buf.WriteString("\treturn " + strings.Join(conditions, " &&\n\t\t   ") + "\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate matchFields for return matcher
 	buf.WriteString("// matchFields checks if all fields match the pattern (for return matcher)\n")
 	buf.WriteString(fmt.Sprintf("func (m *%s[T]) matchFields(\n", returnMatcherName))
 	for _, field := range s.Fields {
-		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n", 
+		buf.WriteString(fmt.Sprintf("\t%s monad.Option[%s],\n",
 			strings.ToLower(field.Name), field.Type))
 	}
 	buf.WriteString(") bool {\n")
-	
+
 	for i, field := range s.Fields {
 		fieldName := strings.ToLower(field.Name)
-		conditions[i] = fmt.Sprintf("m.match%sField(%s, m.value.%s)", 
+		conditions[i] = fmt.Sprintf("m.match%sField(%s, m.value.%s)",
 			exportName(field.Type), fieldName, field.Name)
 	}
-	
+
 	buf.WriteString("\treturn " + strings.Join(conditions, " &&\n\t\t   ") + "\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate field matching methods for each unique type
 	typesSeen := make(map[string]bool)
 	for _, field := range s.Fields {
@@ -431,10 +437,10 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 			continue
 		}
 		typesSeen[field.Type] = true
-		
+
 		typeName := exportName(field.Type)
 		buf.WriteString(fmt.Sprintf("// match%sField checks if a field matches the pattern\n", typeName))
-		buf.WriteString(fmt.Sprintf("func (m *%s) match%sField(pattern monad.Option[%s], value %s) bool {\n", 
+		buf.WriteString(fmt.Sprintf("func (m *%s) match%sField(pattern monad.Option[%s], value %s) bool {\n",
 			matcherName, typeName, field.Type, field.Type))
 		buf.WriteString("\tif pattern.IsWildcard() {\n")
 		buf.WriteString("\t\treturn true // Wildcard matches anything\n")
@@ -444,9 +450,9 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 		buf.WriteString("\t}\n")
 		buf.WriteString("\treturn pattern.Unwrap() == value\n")
 		buf.WriteString("}\n\n")
-		
+
 		buf.WriteString(fmt.Sprintf("// match%sField checks if a field matches the pattern (for return matcher)\n", typeName))
-		buf.WriteString(fmt.Sprintf("func (m *%s[T]) match%sField(pattern monad.Option[%s], value %s) bool {\n", 
+		buf.WriteString(fmt.Sprintf("func (m *%s[T]) match%sField(pattern monad.Option[%s], value %s) bool {\n",
 			returnMatcherName, typeName, field.Type, field.Type))
 		buf.WriteString("\tif pattern.IsWildcard() {\n")
 		buf.WriteString("\t\treturn true // Wildcard matches anything\n")
@@ -457,7 +463,7 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 		buf.WriteString("\treturn pattern.Unwrap() == value\n")
 		buf.WriteString("}\n\n")
 	}
-	
+
 	return nil
 }
 
@@ -465,14 +471,14 @@ func generateMatchCode(buf *bytes.Buffer, s parser.StructInfo) error {
 func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	structName := s.Name
 	reactiveTypeName := "Reactive" + exportName(structName)
-	
+
 	// Add import for monad package and sync
 	buf.WriteString("import (\n")
 	buf.WriteString("\t\"sync\"\n")
 	buf.WriteString("\t\"sync/atomic\"\n")
 	buf.WriteString("\t\"github.com/snowmerak/gofn/monad\"\n")
 	buf.WriteString(")\n\n")
-	
+
 	// Generate reactive wrapper struct
 	buf.WriteString(fmt.Sprintf("// %s provides reactive capabilities for %s\n", reactiveTypeName, structName))
 	buf.WriteString(fmt.Sprintf("type %s struct {\n", reactiveTypeName))
@@ -481,7 +487,7 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\tnextID int64\n")
 	buf.WriteString("\tmutex sync.RWMutex\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate constructor
 	buf.WriteString(fmt.Sprintf("// NewReactive%s creates a new reactive wrapper for %s\n", exportName(structName), structName))
 	buf.WriteString(fmt.Sprintf("func NewReactive%s(initial %s) *%s {\n", exportName(structName), structName, reactiveTypeName))
@@ -491,7 +497,7 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t\tnextID: 0,\n")
 	buf.WriteString("\t}\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate Get method
 	buf.WriteString(fmt.Sprintf("// Get returns the current %s value (thread-safe)\n", structName))
 	buf.WriteString(fmt.Sprintf("func (r *%s) Get() %s {\n", reactiveTypeName, structName))
@@ -499,7 +505,7 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\tdefer r.mutex.RUnlock()\n")
 	buf.WriteString("\treturn r.value\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate Set method
 	buf.WriteString(fmt.Sprintf("// Set updates the %s value and notifies all subscribers\n", structName))
 	buf.WriteString(fmt.Sprintf("func (r *%s) Set(newValue %s) {\n", reactiveTypeName, structName))
@@ -519,7 +525,7 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t\tgo callback(oldValue, newValue)\n")
 	buf.WriteString("\t}\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate Update method
 	buf.WriteString(fmt.Sprintf("// Update applies a function to the current %s value\n", structName))
 	buf.WriteString(fmt.Sprintf("func (r *%s) Update(fn func(%s) %s) {\n", reactiveTypeName, structName, structName))
@@ -540,7 +546,7 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t\tgo callback(oldValue, newValue)\n")
 	buf.WriteString("\t}\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate Subscribe method
 	buf.WriteString("// Subscribe adds a callback for value changes\n")
 	buf.WriteString("// Returns subscription ID for unsubscribing\n")
@@ -552,7 +558,7 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\tr.subscribers[id] = callback\n")
 	buf.WriteString("\treturn id\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate Unsubscribe method
 	buf.WriteString("// Unsubscribe removes a subscription by ID\n")
 	buf.WriteString(fmt.Sprintf("func (r *%s) Unsubscribe(id int) {\n", reactiveTypeName))
@@ -560,14 +566,14 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\tdefer r.mutex.Unlock()\n")
 	buf.WriteString("\tdelete(r.subscribers, id)\n")
 	buf.WriteString("}\n\n")
-	
+
 	// Generate field-specific setters that trigger reactivity
 	for _, field := range s.Fields {
 		// Skip private fields (fields that don't start with uppercase)
 		if len(field.Name) == 0 || (field.Name[0] < 'A' || field.Name[0] > 'Z') {
 			continue
 		}
-		
+
 		setterName := "Set" + exportName(field.Name)
 		buf.WriteString(fmt.Sprintf("// %s updates the %s field and notifies subscribers\n", setterName, field.Name))
 		buf.WriteString(fmt.Sprintf("func (r *%s) %s(value %s) {\n", reactiveTypeName, setterName, field.Type))
@@ -576,19 +582,19 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 		buf.WriteString("\t\treturn current\n")
 		buf.WriteString("\t})\n")
 		buf.WriteString("}\n\n")
-		
+
 		// Generate field getter
-		getterName := "Get" + exportName(field.Name) 
+		getterName := "Get" + exportName(field.Name)
 		buf.WriteString(fmt.Sprintf("// %s returns the current %s field value\n", getterName, field.Name))
 		buf.WriteString(fmt.Sprintf("func (r *%s) %s() %s {\n", reactiveTypeName, getterName, field.Type))
 		buf.WriteString(fmt.Sprintf("\treturn r.Get().%s\n", field.Name))
 		buf.WriteString("}\n\n")
 	}
-	
+
 	// Generate Map function for this specific type
 	mapFuncName := fmt.Sprintf("Map%s", exportName(structName))
 	buf.WriteString(fmt.Sprintf("// %s creates a reactive that transforms %s values\n", mapFuncName, structName))
-	buf.WriteString(fmt.Sprintf("func %s[U any](source *%s, transform func(%s) U) *monad.Reactive[U] {\n", 
+	buf.WriteString(fmt.Sprintf("func %s[U any](source *%s, transform func(%s) U) *monad.Reactive[U] {\n",
 		mapFuncName, reactiveTypeName, structName))
 	buf.WriteString("\tresult := monad.NewReactive(transform(source.Get()))\n")
 	buf.WriteString("\t\n")
@@ -598,6 +604,74 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t\n")
 	buf.WriteString("\treturn result\n")
 	buf.WriteString("}\n\n")
-	
+
+	return nil
+}
+
+// generateRefCode generates reference wrapper code for a struct
+func generateRefCode(buf *bytes.Buffer, s parser.StructInfo) error {
+	structName := s.Name
+	refTypeName := "RefOf" + exportName(structName)
+
+	// Generate reference wrapper struct
+	buf.WriteString(fmt.Sprintf("// %s provides a reference wrapper for %s\n", refTypeName, structName))
+	buf.WriteString(fmt.Sprintf("type %s struct {\n", refTypeName))
+	buf.WriteString(fmt.Sprintf("\tref *%s\n", structName))
+	buf.WriteString("}\n\n")
+
+	// Generate constructor from pointer
+	buf.WriteString(fmt.Sprintf("// New%s creates a new reference wrapper from a pointer\n", refTypeName))
+	buf.WriteString(fmt.Sprintf("func New%s(value *%s) *%s {\n", refTypeName, structName, refTypeName))
+	buf.WriteString(fmt.Sprintf("\treturn &%s{ref: value}\n", refTypeName))
+	buf.WriteString("}\n\n")
+
+	// Generate constructor from value (creates a copy)
+	buf.WriteString(fmt.Sprintf("// New%sFromValue creates a new reference wrapper from a value (creates a copy)\n", refTypeName))
+	buf.WriteString(fmt.Sprintf("func New%sFromValue(value %s) *%s {\n", refTypeName, structName, refTypeName))
+	buf.WriteString(fmt.Sprintf("\treturn &%s{ref: &value}\n", refTypeName))
+	buf.WriteString("}\n\n")
+
+	// Generate Get method
+	buf.WriteString(fmt.Sprintf("// Get returns the underlying pointer\n"))
+	buf.WriteString(fmt.Sprintf("func (r *%s) Get() *%s {\n", refTypeName, structName))
+	buf.WriteString("\treturn r.ref\n")
+	buf.WriteString("}\n\n")
+
+	// Generate Set method
+	buf.WriteString(fmt.Sprintf("// Set updates the underlying pointer\n"))
+	buf.WriteString(fmt.Sprintf("func (r *%s) Set(value *%s) {\n", refTypeName, structName))
+	buf.WriteString("\tr.ref = value\n")
+	buf.WriteString("}\n\n")
+
+	// Generate SetValue method (creates a copy)
+	buf.WriteString(fmt.Sprintf("// SetValue updates the underlying pointer with a copy of the value\n"))
+	buf.WriteString(fmt.Sprintf("func (r *%s) SetValue(value %s) {\n", refTypeName, structName))
+	buf.WriteString("\tr.ref = &value\n")
+	buf.WriteString("}\n\n")
+
+	// Generate IsNil method
+	buf.WriteString(fmt.Sprintf("// IsNil checks if the underlying pointer is nil\n"))
+	buf.WriteString(fmt.Sprintf("func (r *%s) IsNil() bool {\n", refTypeName))
+	buf.WriteString("\treturn r.ref == nil\n")
+	buf.WriteString("}\n\n")
+
+	// Generate Value method (dereferenced access with nil check)
+	buf.WriteString(fmt.Sprintf("// Value returns the dereferenced value, panics if nil\n"))
+	buf.WriteString(fmt.Sprintf("func (r *%s) Value() %s {\n", refTypeName, structName))
+	buf.WriteString("\tif r.ref == nil {\n")
+	buf.WriteString(fmt.Sprintf("\t\tpanic(\"RefOf%s: attempted to access nil reference\")\n", exportName(structName)))
+	buf.WriteString("\t}\n")
+	buf.WriteString("\treturn *r.ref\n")
+	buf.WriteString("}\n\n")
+
+	// Generate ValueOr method (safe dereferenced access with default)
+	buf.WriteString(fmt.Sprintf("// ValueOr returns the dereferenced value or the default if nil\n"))
+	buf.WriteString(fmt.Sprintf("func (r *%s) ValueOr(defaultValue %s) %s {\n", refTypeName, structName, structName))
+	buf.WriteString("\tif r.ref == nil {\n")
+	buf.WriteString("\t\treturn defaultValue\n")
+	buf.WriteString("\t}\n")
+	buf.WriteString("\treturn *r.ref\n")
+	buf.WriteString("}\n\n")
+
 	return nil
 }

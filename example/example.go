@@ -68,6 +68,12 @@ type Counter struct {
 	Name  string
 }
 
+//gofn:ref
+type ListenAddress struct {
+	Host string
+	Port int
+}
+
 // Demo: exercise all generated helpers.
 func main() {
 	// record: exported interface + constructor + getters
@@ -108,7 +114,7 @@ func main() {
 
 	// NEW: Error handling with custom handlers
 	fmt.Println("pipeline with error handlers:")
-	
+
 	// Error handler that provides fallback value
 	fallbackHandler := AnyPipeWithFallback(false) // fallback to false
 	pipeWithFallback := AnyPipeComposerWithErrorHandler(f1, f2Err, f3, fallbackHandler)
