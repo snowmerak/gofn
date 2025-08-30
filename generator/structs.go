@@ -612,6 +612,10 @@ func generateReactiveCode(buf *bytes.Buffer, s parser.StructInfo) error {
 func generateRefCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	structName := s.Name
 	refTypeName := "RefOf" + exportName(structName)
+	constructorName := "Reference" + exportName(structName)
+
+	// Add import for weak package
+	buf.WriteString("import \"weak\"\n\n")
 
 	// Generate reference wrapper struct
 	buf.WriteString(fmt.Sprintf("// %s provides a reference wrapper for %s\n", refTypeName, structName))
@@ -620,18 +624,16 @@ func generateRefCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("}\n\n")
 
 	// Generate constructor from pointer
-	buf.WriteString(fmt.Sprintf("// New%s creates a new reference wrapper from a pointer\n", refTypeName))
-	buf.WriteString(fmt.Sprintf("func New%s(value *%s) *%s {\n", refTypeName, structName, refTypeName))
+	buf.WriteString(fmt.Sprintf("// %s creates a new reference wrapper from a pointer\n", constructorName))
+	buf.WriteString(fmt.Sprintf("func %s(value *%s) *%s {\n", constructorName, structName, refTypeName))
 	buf.WriteString(fmt.Sprintf("\treturn &%s{ref: value}\n", refTypeName))
 	buf.WriteString("}\n\n")
 
 	// Generate constructor from value (creates a copy)
-	buf.WriteString(fmt.Sprintf("// New%sFromValue creates a new reference wrapper from a value (creates a copy)\n", refTypeName))
-	buf.WriteString(fmt.Sprintf("func New%sFromValue(value %s) *%s {\n", refTypeName, structName, refTypeName))
+	buf.WriteString(fmt.Sprintf("// %sFromValue creates a new reference wrapper from a value (creates a copy)\n", constructorName))
+	buf.WriteString(fmt.Sprintf("func %sFromValue(value %s) *%s {\n", constructorName, structName, refTypeName))
 	buf.WriteString(fmt.Sprintf("\treturn &%s{ref: &value}\n", refTypeName))
-	buf.WriteString("}\n\n")
-
-	// Generate Get method
+	buf.WriteString("}\n\n") // Generate Get method
 	buf.WriteString(fmt.Sprintf("// Get returns the underlying pointer\n"))
 	buf.WriteString(fmt.Sprintf("func (r *%s) Get() *%s {\n", refTypeName, structName))
 	buf.WriteString("\treturn r.ref\n")
@@ -671,6 +673,12 @@ func generateRefCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("\t\treturn defaultValue\n")
 	buf.WriteString("\t}\n")
 	buf.WriteString("\treturn *r.ref\n")
+	buf.WriteString("}\n\n")
+
+	// Generate Weak method (creates a weak pointer)
+	buf.WriteString(fmt.Sprintf("// Weak returns a weak pointer to the underlying value\n"))
+	buf.WriteString(fmt.Sprintf("func (r *%s) Weak() weak.Pointer[%s] {\n", refTypeName, structName))
+	buf.WriteString("\treturn weak.Make(r.ref)\n")
 	buf.WriteString("}\n\n")
 
 	return nil
