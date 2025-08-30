@@ -634,31 +634,31 @@ func generateRefCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString(fmt.Sprintf("func %sFromValue(value %s) *%s {\n", constructorName, structName, refTypeName))
 	buf.WriteString(fmt.Sprintf("\treturn &%s{ref: &value}\n", refTypeName))
 	buf.WriteString("}\n\n") // Generate Get method
-	buf.WriteString(fmt.Sprintf("// Get returns the underlying pointer\n"))
+	buf.WriteString("// Get returns the underlying pointer\n")
 	buf.WriteString(fmt.Sprintf("func (r *%s) Get() *%s {\n", refTypeName, structName))
 	buf.WriteString("\treturn r.ref\n")
 	buf.WriteString("}\n\n")
 
 	// Generate Set method
-	buf.WriteString(fmt.Sprintf("// Set updates the underlying pointer\n"))
+	buf.WriteString("// Set updates the underlying pointer\n")
 	buf.WriteString(fmt.Sprintf("func (r *%s) Set(value *%s) {\n", refTypeName, structName))
 	buf.WriteString("\tr.ref = value\n")
 	buf.WriteString("}\n\n")
 
 	// Generate SetValue method (creates a copy)
-	buf.WriteString(fmt.Sprintf("// SetValue updates the underlying pointer with a copy of the value\n"))
+	buf.WriteString("// SetValue updates the underlying pointer with a copy of the value\n")
 	buf.WriteString(fmt.Sprintf("func (r *%s) SetValue(value %s) {\n", refTypeName, structName))
 	buf.WriteString("\tr.ref = &value\n")
 	buf.WriteString("}\n\n")
 
 	// Generate IsNil method
-	buf.WriteString(fmt.Sprintf("// IsNil checks if the underlying pointer is nil\n"))
+	buf.WriteString("// IsNil checks if the underlying pointer is nil\n")
 	buf.WriteString(fmt.Sprintf("func (r *%s) IsNil() bool {\n", refTypeName))
 	buf.WriteString("\treturn r.ref == nil\n")
 	buf.WriteString("}\n\n")
 
 	// Generate Value method (dereferenced access with nil check)
-	buf.WriteString(fmt.Sprintf("// Value returns the dereferenced value, panics if nil\n"))
+	buf.WriteString("// Value returns the dereferenced value, panics if nil\n")
 	buf.WriteString(fmt.Sprintf("func (r *%s) Value() %s {\n", refTypeName, structName))
 	buf.WriteString("\tif r.ref == nil {\n")
 	buf.WriteString(fmt.Sprintf("\t\tpanic(\"RefOf%s: attempted to access nil reference\")\n", exportName(structName)))
@@ -667,7 +667,7 @@ func generateRefCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("}\n\n")
 
 	// Generate ValueOr method (safe dereferenced access with default)
-	buf.WriteString(fmt.Sprintf("// ValueOr returns the dereferenced value or the default if nil\n"))
+	buf.WriteString("// ValueOr returns the dereferenced value or the default if nil\n")
 	buf.WriteString(fmt.Sprintf("func (r *%s) ValueOr(defaultValue %s) %s {\n", refTypeName, structName, structName))
 	buf.WriteString("\tif r.ref == nil {\n")
 	buf.WriteString("\t\treturn defaultValue\n")
@@ -676,7 +676,7 @@ func generateRefCode(buf *bytes.Buffer, s parser.StructInfo) error {
 	buf.WriteString("}\n\n")
 
 	// Generate Weak method (creates a weak pointer)
-	buf.WriteString(fmt.Sprintf("// Weak returns a weak pointer to the underlying value\n"))
+	buf.WriteString("// Weak returns a weak pointer to the underlying value\n")
 	buf.WriteString(fmt.Sprintf("func (r *%s) Weak() weak.Pointer[%s] {\n", refTypeName, structName))
 	buf.WriteString("\treturn weak.Make(r.ref)\n")
 	buf.WriteString("}\n\n")
