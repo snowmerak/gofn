@@ -417,6 +417,248 @@ emptyAddr.Match().
     })
 ```
 
+### 6. `//gofn:ref` - Reference Wrappers
+
+Generate reference wrapper types that provide safe pointer management with utilities for dereferencing and weak pointer support.
+
+**Input:**
+```go
+//gofn:ref
+type ListenAddress struct {
+    Host string
+    Port int
+}
+```
+
+**Generated:**
+```go
+import "weak"
+
+// RefOfListenAddress provides a reference wrapper for ListenAddress
+type RefOfListenAddress struct {
+    ref *ListenAddress
+}
+
+// ReferenceListenAddress creates a new reference wrapper from a pointer
+func ReferenceListenAddress(value *ListenAddress) *RefOfListenAddress {
+    return &RefOfListenAddress{ref: value}
+}
+
+// ReferenceListenAddressFromValue creates a new reference wrapper from a value (creates a copy)
+func ReferenceListenAddressFromValue(value ListenAddress) *RefOfListenAddress {
+    return &RefOfListenAddress{ref: &value}
+}
+
+// Get returns the underlying pointer
+func (r *RefOfListenAddress) Get() *ListenAddress {
+    return r.ref
+}
+
+// Set updates the underlying pointer
+func (r *RefOfListenAddress) Set(value *ListenAddress) {
+    r.ref = value
+}
+
+// SetValue updates the underlying pointer with a copy of the value
+func (r *RefOfListenAddress) SetValue(value ListenAddress) {
+    r.ref = &value
+}
+
+// IsNil checks if the underlying pointer is nil
+func (r *RefOfListenAddress) IsNil() bool {
+    return r.ref == nil
+}
+
+// Value returns the dereferenced value, panics if nil
+func (r *RefOfListenAddress) Value() ListenAddress {
+    if r.ref == nil {
+        panic("RefOfListenAddress: attempted to access nil reference")
+    }
+    return *r.ref
+}
+
+// ValueOr returns the dereferenced value or the default if nil
+func (r *RefOfListenAddress) ValueOr(defaultValue ListenAddress) ListenAddress {
+    if r.ref == nil {
+        return defaultValue
+    }
+    return *r.ref
+}
+
+// Weak returns a weak pointer to the underlying value
+func (r *RefOfListenAddress) Weak() weak.Pointer[ListenAddress] {
+    return weak.Make(r.ref)
+}
+```
+
+**Usage:**
+```go
+// Create from pointer
+addr := &ListenAddress{Host: "localhost", Port: 8080}
+ref := ReferenceListenAddress(addr)
+
+// Create from value (creates a copy)
+ref2 := ReferenceListenAddressFromValue(ListenAddress{Host: "0.0.0.0", Port: 443})
+
+// Safe dereferencing
+if !ref.IsNil() {
+    value := ref.Value()
+    fmt.Printf("Address: %s:%d\n", value.Host, value.Port)
+}
+
+// Safe dereferencing with default
+defaultAddr := ListenAddress{Host: "127.0.0.1", Port: 80}
+value := ref.ValueOr(defaultAddr)
+
+// Weak pointer for cycle breaking
+weakPtr := ref.Weak()
+if strongPtr := weakPtr.Value(); strongPtr != nil {
+    fmt.Printf("Still alive: %s:%d\n", strongPtr.Host, strongPtr.Port)
+}
+
+// Pointer management
+ref.Set(nil)                    // Clear reference
+ref.SetValue(defaultAddr)       // Set from value
+underlying := ref.Get()         // Get raw pointer
+```
+
+**Reference Wrapper Features:**
+- **Safe Dereferencing**: `Value()` with panic protection and `ValueOr()` with defaults
+- **Pointer Management**: `Get()`, `Set()`, `SetValue()` for flexible pointer handling
+- **Nil Safety**: `IsNil()` for safe null checks
+- **Weak Pointers**: `Weak()` for breaking reference cycles
+- **Value/Pointer Flexibility**: Constructors for both pointer and value inputs
+
+### 7. `//gofn:reactive` - Reactive Programming
+
+Generate reactive wrapper types that provide observable state management with subscription-based change notifications.
+
+**Input:**
+```go
+//gofn:reactive
+type Counter struct {
+    Value int
+    Name  string
+}
+```
+
+**Generated:**
+```go
+import (
+    "github.com/snowmerak/gofn/monad"
+    "sync"
+    "sync/atomic"
+)
+
+// ReactiveCounter provides reactive capabilities for Counter
+type ReactiveCounter struct {
+    value       Counter
+    subscribers map[int]func(old Counter, new Counter)
+    nextID      int64
+    mutex       sync.RWMutex
+}
+
+// NewReactiveCounter creates a new reactive wrapper for Counter
+func NewReactiveCounter(initial Counter) *ReactiveCounter {
+    return &ReactiveCounter{
+        value:       initial,
+        subscribers: make(map[int]func(old Counter, new Counter)),
+        nextID:      0,
+    }
+}
+
+// Get returns the current Counter value (thread-safe)
+func (r *ReactiveCounter) Get() Counter {
+    r.mutex.RLock()
+    defer r.mutex.RUnlock()
+    return r.value
+}
+
+// Set updates the Counter value and notifies all subscribers
+func (r *ReactiveCounter) Set(newValue Counter) {
+    // Thread-safe implementation with subscriber notifications
+}
+
+// Update applies a function to the current Counter value
+func (r *ReactiveCounter) Update(fn func(Counter) Counter) {
+    // Atomic update with change notifications
+}
+
+// Subscribe adds a callback for value changes
+func (r *ReactiveCounter) Subscribe(callback func(old Counter, new Counter)) int {
+    // Returns subscription ID for unsubscribing
+}
+
+// Unsubscribe removes a subscription by ID
+func (r *ReactiveCounter) Unsubscribe(id int) {
+    // Remove subscriber callback
+}
+
+// Field-specific setters and getters
+func (r *ReactiveCounter) SetValue(value int) { /* ... */ }
+func (r *ReactiveCounter) GetValue() int { /* ... */ }
+func (r *ReactiveCounter) SetName(value string) { /* ... */ }
+func (r *ReactiveCounter) GetName() string { /* ... */ }
+
+// MapCounter creates a reactive that transforms Counter values
+func MapCounter[U any](source *ReactiveCounter, transform func(Counter) U) *monad.Reactive[U] {
+    // Creates a derived reactive that automatically updates when source changes
+}
+```
+
+**Usage:**
+```go
+// Create reactive counter
+counter := NewReactiveCounter(Counter{Value: 0, Name: "MainCounter"})
+
+// Subscribe to changes
+subID1 := counter.Subscribe(func(old, new Counter) {
+    fmt.Printf("Counter changed from %d to %d\n", old.Value, new.Value)
+})
+
+subID2 := counter.Subscribe(func(old, new Counter) {
+    if new.Value > 10 {
+        fmt.Printf("High value alert: %d\n", new.Value)
+    }
+})
+
+// Update values (triggers subscribers)
+counter.SetValue(5)     // Triggers both subscribers
+counter.SetValue(15)    // Triggers both, including high value alert
+counter.SetName("UpdatedCounter")
+
+// Functional updates
+counter.Update(func(c Counter) Counter {
+    c.Value += 10
+    c.Name = "Modified" + c.Name
+    return c
+})
+
+// Unsubscribe when done
+counter.Unsubscribe(subID1)
+counter.SetValue(20)    // Only subID2 will be notified
+
+// Reactive mapping for derived values
+stringReactive := MapCounter[string](counter, func(c Counter) string {
+    return fmt.Sprintf("%s: %d", c.Name, c.Value)
+})
+
+stringReactive.Subscribe(func(old, new string) {
+    fmt.Printf("String representation: %s\n", new)
+})
+
+counter.SetValue(25) // Triggers both counter and string reactive
+```
+
+**Reactive Features:**
+- **Thread Safety**: All operations are protected with read-write mutexes
+- **Subscription Management**: Add/remove observers with unique IDs
+- **Field-Specific Updates**: Generated setters for individual fields
+- **Functional Updates**: Apply transformation functions atomically
+- **Async Notifications**: Subscribers are called in separate goroutines
+- **Reactive Mapping**: Transform values to derived reactive streams
+- **Memory Safety**: Prevent deadlocks with careful lock management
+
 ## Complete Example
 
 ```go
@@ -461,6 +703,18 @@ type LoginAttempt struct {
     Username string
     Success  bool
     IP       string
+}
+
+//gofn:ref
+type NetworkEndpoint struct {
+    Host string
+    Port int
+}
+
+//gofn:reactive
+type AppState struct {
+    Status string
+    Count  int
 }
 
 func main() {
@@ -525,6 +779,64 @@ func main() {
         Default(func(l LoginAttempt) {
             fmt.Printf("Regular failed login: %s\n", l.Username)
         })
+    
+    // Reference wrapper usage
+    endpoint := &NetworkEndpoint{Host: "api.example.com", Port: 443}
+    ref := ReferenceNetworkEndpoint(endpoint)
+    
+    if !ref.IsNil() {
+        fmt.Printf("Endpoint: %s:%d\n", ref.Value().Host, ref.Value().Port)
+    }
+    
+    // Safe access with default
+    defaultEndpoint := NetworkEndpoint{Host: "localhost", Port: 8080}
+    safeValue := ref.ValueOr(defaultEndpoint)
+    fmt.Printf("Safe endpoint: %s:%d\n", safeValue.Host, safeValue.Port)
+    
+    // Weak pointer for memory management
+    weakRef := ref.Weak()
+    if strongPtr := weakRef.Value(); strongPtr != nil {
+        fmt.Printf("Weak reference still valid: %s:%d\n", strongPtr.Host, strongPtr.Port)
+    }
+    
+    // Reactive programming usage
+    appState := NewReactiveAppState(AppState{Status: "initializing", Count: 0})
+    
+    // Subscribe to state changes
+    stateSubID := appState.Subscribe(func(old, new AppState) {
+        fmt.Printf("State changed: %s (%d) -> %s (%d)\n", 
+            old.Status, old.Count, new.Status, new.Count)
+    })
+    
+    countSubID := appState.Subscribe(func(old, new AppState) {
+        if new.Count > 5 {
+            fmt.Printf("High count alert: %d\n", new.Count)
+        }
+    })
+    
+    // Update state (triggers subscribers)
+    appState.SetStatus("running")
+    appState.SetCount(3)
+    appState.Update(func(state AppState) AppState {
+        state.Count += 5
+        state.Status = "processing"
+        return state
+    })
+    
+    // Create derived reactive
+    statusDisplay := MapAppState[string](appState, func(state AppState) string {
+        return fmt.Sprintf("[%s] Count: %d", state.Status, state.Count)
+    })
+    
+    statusDisplay.Subscribe(func(old, new string) {
+        fmt.Printf("Display: %s\n", new)
+    })
+    
+    appState.SetCount(10) // Triggers all reactive subscriptions
+    
+    // Cleanup subscriptions
+    appState.Unsubscribe(stateSubID)
+    appState.Unsubscribe(countSubID)
 }
 ```
 
